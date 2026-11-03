@@ -28,6 +28,7 @@ const CATEGORIES = [
   { id: 'Podcasts', action: 'podcast', words: ['podcast','podcasts','episode','pod'] },
   { id: 'Courses & Certs', action: 'search', words: ['course','class','certification','cert','certificate','exam','bootcamp','workshop','training','udemy','coursera'] },
   { id: 'Services', action: 'map', words: ['barber','barbershop','haircut','salon','dentist','doctor','therapist','mechanic','tailor','plumber','trainer','physio','dermatologist','nails','spa','massage','gym','cleaner','stylist'] },
+  { id: 'Apartments', action: 'map', words: ['apartment','apartments','apt','rental','rentals','1br','2br','3br','1 bedroom','2 bedroom','3 bedroom','one bedroom','two bedroom','listing','open house','broker','no fee','lease','sublet','condo','townhouse','brownstone','studio apartment'] },
   { id: 'Places & Travel', action: 'map', words: ['hotel','trip','travel','beach','park','museum','hike','island','airbnb','resort','gallery','vacation'] },
   { id: 'Products', action: 'search', words: ['buy','product','app','gadget','shoes','sneakers','jacket','headphones','skincare','cologne','perfume','moisturizer'] },
   { id: 'Other', action: 'search', words: [] },
@@ -42,8 +43,13 @@ const DOMAINS = [
   [/resy\.com|opentable|exploretock|yelp\.com|theinfatuation|eater\.com/i, 'Restaurants'],
   [/cooking\.nytimes|allrecipes|bonappetit|seriouseats|epicurious|food52|budgetbytes/i, 'Recipes'],
   [/goodreads|bookshop\.org/i, 'Books'],
+  [/streeteasy|zillow|apartments\.com|renthop|redfin|trulia|realtor\.com|compass\.com|corcoran/i, 'Apartments'],
   [/airbnb|booking\.com|tripadvisor/i, 'Places & Travel'],
 ];
+
+// "987 Flushing Ave", "12 W 4th St", "350 Broadway"
+const ADDRESS = /^\s*\d+[a-z]?\s+[\w .'-]*?\b(ave|avenue|st|street|blvd|boulevard|rd|road|pl|place|ln|lane|dr|drive|ct|court|pkwy|parkway|ter|terrace|broadway)\b/i;
+const isCategoryWord = s => !!CAT[cap(s)] || KEYWORDS.some(k => k.w === s.toLowerCase());
 
 const reEsc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 // Longest keyword wins, so "wine bar" beats "bar" and "tv show" beats "show"
@@ -54,6 +60,7 @@ const KEYWORDS = CATEGORIES
 function guessCategory(text, link) {
   if (link) for (const [re, cat] of DOMAINS) if (re.test(link)) return cat;
   for (const k of KEYWORDS) if (k.re.test(text)) return k.cat;
+  if (ADDRESS.test(text)) return 'Places & Travel';
   return 'Other';
 }
 
@@ -75,7 +82,8 @@ function parse(raw, override, fallbackCat) {
 
   let from = '';
   text = text.replace(/(?:^|[\s,;])(?:from|via|thanks to|recommended by|rec by)\s+([^,;.]{1,40}?)\s*(?=[,;.]|$)/i, (_, who) => {
-    from = cap(who.trim());
+    // "from apartments" names a category, not a person; the category was already read from it
+    if (!isCategoryWord(who.trim())) from = cap(who.trim());
     return '';
   });
 
@@ -116,7 +124,8 @@ async function fetchMeta(link) {
 function action(r) {
   if (r.link) return { label: 'Open', url: r.link };
   const name = encodeURIComponent(r.name);
-  switch (CAT[r.category]?.action) {
+  const kind = ADDRESS.test(r.name) ? 'map' : CAT[r.category]?.action;
+  switch (kind) {
     case 'map':
       return { label: 'Map', url: `https://maps.apple.com/?q=${encodeURIComponent([r.name, r.where].filter(Boolean).join(' '))}` };
     case 'watch':
