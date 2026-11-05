@@ -595,3 +595,16 @@ section { margin-bottom: 28px; }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
 }
+
+/* Been */
+.been-link {
+  width: 100%;
+  text-align: left;
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 14px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.empty .been-link { margin-top: 24px; }

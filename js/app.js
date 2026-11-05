@@ -67,8 +67,19 @@ function guessCategory(text, link) {
 // ── Parsing: "Lilia, pasta in Williamsburg, from Ana" ──
 const cap = s => s ? s[0].toUpperCase() + s.slice(1) : s;
 
-function parse(raw, override, fallbackCat) {
+const titleCase = s => s.replace(/(^|[\s-])([a-z])/g, (_, a, b) => a + b.toUpperCase());
+
+// been: logging a place already visited. "Sushi Lin, Prospect Heights, yesterday"
+function parse(raw, override, fallbackCat, been) {
   let text = raw.trim();
+  let beenAt = 0;
+  if (been) {
+    text = text.replace(/^(?:went to|been to|visited)\s+/i, '');
+    text = text.replace(/(?:^|[\s,;])(today|tonight|yesterday|last night)(?=[\s,;.]|$)/i, (_, w) => {
+      if (/yesterday|last night/i.test(w)) beenAt = Date.now() - 86400000;
+      return ' ';
+    });
+  }
   let link = '';
   const url = text.match(/https?:\/\/[^\s,]+/i);
   if (url) {
@@ -79,6 +90,8 @@ function parse(raw, override, fallbackCat) {
 
   let category = override || guessCategory(text, link);
   if (category === 'Other' && !override && fallbackCat) category = fallbackCat;
+  // Most places you log are somewhere you ate
+  if (category === 'Other' && !override && been) category = 'Restaurants';
 
   let from = '';
   text = text.replace(/(?:^|[\s,;])(?:from|via|thanks to|recommended by|rec by)\s+([^,;.]{1,40}?)\s*(?=[,;.]|$)/i, (_, who) => {
@@ -91,13 +104,14 @@ function parse(raw, override, fallbackCat) {
   let where = '';
   if (CAT[category].action === 'map') {
     text = text.replace(/(?:^|\s)(?:in|near)\s+([^,;]{1,40}?)\s*(?=[,;]|$)/i, (_, w) => {
-      where = cap(w.trim());
+      where = titleCase(w.trim());
       return '';
     });
   }
 
   const parts = text.split(/\s*[,;]\s*|\s+[-–—:]\s+/).map(s => s.trim()).filter(Boolean);
   let name = cap(parts.shift() || '');
+  if (been && !where && parts.length && CAT[category].action === 'map') where = titleCase(parts.shift());
   const note = cap(parts.join(', '));
 
   let needsTitle = false;
@@ -105,7 +119,7 @@ function parse(raw, override, fallbackCat) {
     try { name = new URL(link).hostname.replace(/^www\./, ''); } catch { name = link; }
     needsTitle = true;
   }
-  return { name, note, from, where, link, category, needsTitle };
+  return { name, note, from, where, link, category, needsTitle, beenAt };
 }
 
 // Title and picture for links from Spotify, YouTube, Vimeo and similar
@@ -236,6 +250,14 @@ let navigatedIn = false;
 
 const all = () => Object.entries(items).map(([id, r]) => ({ id, ...r }));
 
+// Been: every place you've tried, whether you logged it there or ticked off a rec
+const BEEN = 'Been';
+const isBeen = () => decodeURIComponent(location.hash.replace(/^#\/?/, '')) === BEEN;
+const beenTime = r => r.beenAt || r.updatedAt;
+const beenList = () => all()
+  .filter(r => r.status !== 'todo' && CAT[r.category]?.action === 'map' && r.category !== 'Apartments')
+  .sort((a, b) => beenTime(b) - beenTime(a));
+
 function currentCat() {
   const h = decodeURIComponent(location.hash.replace(/^#\/?/, ''));
   return CAT[h] ? h : null;
@@ -244,17 +266,29 @@ function currentCat() {
 // ── Rendering ──
 function render() {
   const cat = currentCat();
-  $('backBtn').classList.toggle('hidden', !cat);
-  $('title').textContent = cat || 'Recs';
-  $('searchWrap').classList.toggle('hidden', !!cat);
-  $('main').innerHTML = cat ? renderCategory(cat) : query ? renderSearch() : renderHome();
+  const been = isBeen();
+  $('backBtn').classList.toggle('hidden', !cat && !been);
+  $('title').textContent = cat || (been ? 'Been' : 'Recs');
+  $('searchWrap').classList.toggle('hidden', !!cat || been);
+  $('addInput').placeholder = been ? 'Sushi Lin, Prospect Heights' : 'Lilia, pasta, from Ana';
+  $('main').innerHTML = mainHtml();
   // Don't redraw the sheet under someone typing in it
   const typing = $('sheet').contains(document.activeElement) && /INPUT|TEXTAREA/.test(document.activeElement.tagName);
   if (detailId && items[detailId] && !typing) renderDetail();
 }
 
+function mainHtml() {
+  const cat = currentCat();
+  return cat ? renderCategory(cat) : isBeen() ? renderBeen() : query ? renderSearch() : renderHome();
+}
+
 function renderHome() {
   const recs = all();
+  const beenCount = beenList().length;
+  const beenLink = `<button class="been-link" data-been>
+      <span class="tile-name">Places I've been</span>
+      <span class="tile-count">${beenCount ? `${beenCount} place${beenCount === 1 ? '' : 's'}` : 'Log one'}</span>
+    </button>`;
   if (!recs.length) {
     return `<div class="empty">
       <h2>Nothing saved yet</h2>
@@ -264,6 +298,7 @@ function renderHome() {
         <button class="example" data-example="Severance on Apple TV, from Tunde">Severance on Apple TV, from Tunde</button>
         <button class="example" data-example="Fade Room barber in Bed-Stuy, from Kemi">Fade Room barber in Bed-Stuy, from Kemi</button>
       </div>
+      ${beenLink}
     </div>`;
   }
 
@@ -293,6 +328,7 @@ function renderHome() {
         <span class="next-meta">${esc(r.from ? 'from ' + r.from : ago(r.createdAt))}</span>
       </button>`).join('')}</div>
     </section>` : ''}
+    <section>${beenLink}</section>
     <section>
       <h2 class="label">Categories</h2>
       <div class="tiles">${tiles}</div>
@@ -323,6 +359,20 @@ function renderCategory(cat) {
   return seg + chips + body;
 }
 
+function renderBeen() {
+  let shown = beenList();
+  if (!shown.length) {
+    return `<p class="none">Type a place below, like "Yori and Sool, Midtown" or "Sushi Lin in Prospect Heights, yesterday".</p>`;
+  }
+  const wheres = [...new Set(shown.map(r => r.where).filter(Boolean))];
+  if (filter && !wheres.includes(filter)) filter = '';
+  if (filter) shown = shown.filter(r => r.where === filter);
+  const chips = wheres.length > 1
+    ? `<div class="chips">${['', ...wheres].map(t => `<button class="chip ${filter === t ? 'on' : ''}" data-filter="${esc(t)}">${t ? esc(t) : 'All'}</button>`).join('')}</div>`
+    : '';
+  return chips + `<div class="cards">${shown.map(r => card(r, false, true)).join('')}</div>`;
+}
+
 function renderSearch() {
   const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
   const hits = all()
@@ -336,10 +386,12 @@ function renderSearch() {
     <div class="cards">${hits.map(r => card(r, true)).join('')}</div>`;
 }
 
-function card(r, showCat) {
-  const meta = [showCat && r.category, r.from && 'from ' + r.from, r.where, ago(r.createdAt)].filter(Boolean).join(' · ');
+function card(r, showCat, been) {
+  const meta = been
+    ? [r.where, r.category !== 'Restaurants' && r.category, ago(beenTime(r))].filter(Boolean).join(' · ')
+    : [showCat && r.category, r.from && 'from ' + r.from, r.where, ago(r.createdAt)].filter(Boolean).join(' · ');
   const act = action(r);
-  return `<div class="card ${r.status !== 'todo' ? 'done' : ''}" data-open="${r.id}">
+  return `<div class="card ${r.status !== 'todo' && !been ? 'done' : ''}" data-open="${r.id}">
     ${r.image ? `<img class="thumb" src="${esc(r.image)}" alt="" loading="lazy" />` : ''}
     <div class="card-body">
       <div class="card-name">${esc(r.name)}${r.status === 'loved' ? '<span class="badge">Loved</span>' : ''}</div>
@@ -392,7 +444,7 @@ function renderDetail() {
     </div>
     <div class="sheet-foot">
       <button class="link-btn danger" data-delete>Delete</button>
-      <span>Added ${ago(r.createdAt)}</span>
+      <span>${r.status !== 'todo' && r.beenAt ? `Been ${ago(r.beenAt)}` : `Added ${ago(r.createdAt)}`}</span>
     </div>`;
 }
 
@@ -440,8 +492,9 @@ function updatePreview() {
     $('picker').classList.add('hidden');
     return;
   }
-  const p = parse(text, override, currentCat());
-  const meta = [p.from && 'from ' + p.from, p.where].filter(Boolean).join(' · ');
+  const been = isBeen();
+  const p = parse(text, override, currentCat(), been);
+  const meta = [p.from && 'from ' + p.from, p.where, been && 'been ' + ago(p.beenAt || Date.now())].filter(Boolean).join(' · ');
   $('preview').innerHTML = `
     <button class="pv-cat" data-pick>${esc(p.category)}
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>
@@ -460,10 +513,22 @@ function save() {
   const input = $('addInput');
   const text = input.value.trim();
   if (!text) { input.focus(); return; }
-  const p = parse(text, override, currentCat());
+  const been = isBeen();
+  const p = parse(text, override, currentCat(), been);
   if (!p.name) { toast('Add a name first'); return; }
 
   const dupe = all().find(r => r.name.toLowerCase() === p.name.toLowerCase() && r.category === p.category);
+  // Logging a place you'd saved as a rec ticks off the rec instead of making a second one
+  if (dupe && been) {
+    const fields = { status: 'loved', beenAt: p.beenAt || Date.now() };
+    if (!dupe.where && p.where) fields.where = p.where;
+    patch(dupe.id, fields);
+    input.value = '';
+    updatePreview();
+    input.blur();
+    toast(`Marked ${dupe.name} as been`);
+    return;
+  }
   if (dupe) {
     toast(`Already saved in ${p.category}`);
     openDetail(dupe.id);
@@ -471,15 +536,17 @@ function save() {
   }
 
   const now = Date.now();
-  const id = store.add({
+  const rec = {
     name: p.name, category: p.category, note: p.note, from: p.from, where: p.where,
-    link: p.link, image: '', status: 'todo', createdAt: now, updatedAt: now
-  });
+    link: p.link, image: '', status: been ? 'loved' : 'todo', createdAt: now, updatedAt: now
+  };
+  if (been) rec.beenAt = p.beenAt || now;
+  const id = store.add(rec);
 
   input.value = '';
   updatePreview();
   input.blur();
-  toast(`Saved to ${p.category}`);
+  toast(been ? `Saved ${p.name}` : `Saved to ${p.category}`);
 
   if (p.link) {
     fetchMeta(p.link).then(m => {
@@ -531,15 +598,14 @@ function bindEvents() {
     items[id] = { ...items[id], [field]: value };
     store.update(id, { [field]: value, updatedAt: Date.now() });
     // Re-render the list only, so the sheet's inputs keep focus
-    const cat = currentCat();
-    $('main').innerHTML = cat ? renderCategory(cat) : query ? renderSearch() : renderHome();
+    $('main').innerHTML = mainHtml();
   });
 
   document.addEventListener('click', e => {
     const t = e.target;
     if (t.closest('a')) return;
 
-    const el = t.closest('[data-cat],[data-open],[data-tab],[data-filter],[data-example],[data-status],[data-setcat],[data-delete],[data-close],[data-pick],[data-pickcat],[data-signout]');
+    const el = t.closest('[data-cat],[data-open],[data-tab],[data-filter],[data-example],[data-status],[data-setcat],[data-delete],[data-close],[data-pick],[data-pickcat],[data-signout],[data-been]');
     if (!el) return;
     const d = el.dataset;
 
@@ -548,14 +614,19 @@ function bindEvents() {
     else if (d.tab !== undefined) { tab = d.tab; filter = ''; render(); }
     else if (d.filter !== undefined) { filter = d.filter; render(); }
     else if (d.example !== undefined) { $('addInput').value = d.example; updatePreview(); $('addInput').focus(); }
-    else if (d.status !== undefined) patch(detailId, { status: d.status });
+    else if (d.status !== undefined) {
+      const p = { status: d.status };
+      if (d.status !== 'todo' && !items[detailId].beenAt) p.beenAt = Date.now();
+      patch(detailId, p);
+    }
+    else if (d.been !== undefined) { navigatedIn = true; location.hash = '/' + BEEN; }
     else if (d.setcat !== undefined) patch(detailId, { category: d.setcat });
     else if (d.delete !== undefined) deleteRec(detailId);
     else if (d.close !== undefined) closeSheet();
     else if (d.pick !== undefined) {
       const picker = $('picker');
       picker.classList.toggle('hidden');
-      if (!picker.classList.contains('hidden')) renderPicker(parse($('addInput').value, override, currentCat()).category);
+      if (!picker.classList.contains('hidden')) renderPicker(parse($('addInput').value, override, currentCat(), isBeen()).category);
     }
     else if (d.pickcat !== undefined) { override = d.pickcat; $('picker').classList.add('hidden'); updatePreview(); }
     else if (d.signout !== undefined) {
