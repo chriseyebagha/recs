@@ -199,20 +199,41 @@ function sameName(a, b) {
   return long.includes(short) && short.length / long.length >= 0.5;
 }
 
+// "403 Madison Ave N #103" → "403 Madison Ave N"; unit numbers confuse the lookup
+const street = w => (w || '').split(',')[0].replace(/\s*(?:#|\bapt\.?|\bunit|\bste\.?|\bsuite)\s*[\w-]*\s*$/i, '').trim();
+
+async function lookup(q) {
+  const res = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&lat=${NYC[0]}&lon=${NYC[1]}&limit=6`);
+  return (await res.json()).features || [];
+}
+
 async function geocode(r) {
+  try {
+    const hit = await geocodeName(r);
+    if (hit) return hit;
+    // Not in the map data by name, but its street address is
+    if (ADDRESS.test(r.where || '')) {
+      const st = street(r.where);
+      const num = st.match(/^\d+[a-z]?/i)[0].toLowerCase();
+      const city = cityOf(r);
+      const q = [st, r.where.includes(',') ? r.where.split(',').slice(1).join(' ') : '', r.city].filter(Boolean).join(' ');
+      const found = (await lookup(q)).find(f => (f.properties.housenumber || '').toLowerCase() === num
+        && (!city || city === 'New York' || normCity(f.properties.city || f.properties.county) === city));
+      if (found) return { ...found, byAddress: true };
+    }
+    return null;
+  } catch {
+    return { error: true };
+  }
+}
+
+async function geocodeName(r) {
   const addr = ADDRESS.test(r.name);
   const city = cityOf(r);
   const queries = [[r.name, r.where, r.city].filter(Boolean).join(' ')];
   if (r.where || r.city) queries.push(r.name);
   for (const [i, q] of queries.entries()) {
-    let j;
-    try {
-      const res = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&lat=${NYC[0]}&lon=${NYC[1]}&limit=6`);
-      j = await res.json();
-    } catch {
-      return { error: true };
-    }
-    const hit = (j.features || []).find(f => {
+    const hit = (await lookup(q)).find(f => {
       const p = f.properties;
       if (addr) return !!p.housenumber && r.name.trim().toLowerCase().startsWith(p.housenumber.toLowerCase());
       if (!sameName(p.name, r.name)) return false;
@@ -231,7 +252,7 @@ function placeFields(hit, r) {
   if (BOROUGHS.includes(f.hood.toLowerCase())) f.hood = '';
   if (r.city) delete f.city;
   if (!r.where && f.hood) f.where = f.hood;
-  if (r.auto) {
+  if (r.auto && !hit.byAddress) {
     const c = OSM_CATS[p.osm_value];
     if (c && c !== r.category) f.category = c;
     f.auto = null;
@@ -239,7 +260,9 @@ function placeFields(hit, r) {
   return f;
 }
 
-const wantsGeo = r => !r.geo && (isPlace(r) || (r.category === 'Other' && !!r.where));
+// Bumped when the lookup gets better, so places it missed get another try
+const GEO_VERSION = 2;
+const wantsGeo = r => (!r.geo || (r.geo === 'none' && (r.geoTry || 0) < GEO_VERSION)) && (isPlace(r) || (r.category === 'Other' && !!r.where));
 const geoQueue = [];
 let geoBusy = false;
 
@@ -259,8 +282,8 @@ async function pumpGeo() {
     const hit = await geocode(r);
     if (hit?.error) { geoQueue.length = 0; break; }  // offline; tried again on the next data change
     // Skip if it was edited while we looked
-    if (items[id] && items[id].name === r.name && items[id].where === r.where && !items[id].geo) {
-      const fields = hit ? placeFields(hit, r) : { geo: 'none' };
+    if (items[id] && items[id].name === r.name && items[id].where === r.where && wantsGeo({ id, ...items[id] })) {
+      const fields = hit ? { ...placeFields(hit, r), geoTry: null } : { geo: 'none', geoTry: GEO_VERSION };
       items[id] = { ...items[id], ...fields };
       for (const k in fields) if (fields[k] === null) delete items[id][k];
       store.update(id, fields);
