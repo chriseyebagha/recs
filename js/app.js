@@ -70,12 +70,14 @@ const CITIES = ['london','lagos','abuja','accra','nairobi','paris','rome','milan
 
 const normCity = c => BOROUGHS.includes((c || '').trim().toLowerCase()) ? 'New York' : (c || '').trim();
 
+const STATEZIP = /^([a-z]{2}\s*)?\d{5}(-\d{4})?$|^[a-z]{2}$|^(usa?|united states)$/i;
+
 // "Prospect Heights" → New York, "Shoreditch, London" → London, "Lagos" → Lagos
 function cityFromWhere(w) {
   if (!w) return '';
   if (ADDRESS.test(w) && !w.includes(',')) return '';
   // A pasted address ends in a state, zip or country: "…, Dallas, TX 75206" → Dallas
-  const parts = w.split(',').map(x => x.trim()).filter(x => x && !/^([a-z]{2}\s*)?\d{5}(-\d{4})?$|^[a-z]{2}$|^(usa?|united states)$/i.test(x));
+  const parts = w.split(',').map(x => x.trim()).filter(x => x && !STATEZIP.test(x));
   if (parts.length > 1) return titleCase(normCity(parts.at(-1)));
   if (w.includes(',')) return '';
   if ([...BOROUGHS, ...NYC_HOODS].some(h => wordRe(h).test(w))) return 'New York';
@@ -144,7 +146,8 @@ function parse(raw, override, fallbackCat, been) {
   }
 
   let from = '';
-  text = text.replace(/(?:^|[\s,;])(?:from|via|thanks to|recommended by|rec by)\s+([^,;.]{1,40}?)\s*(?=[,;.]|$)/i, (_, who) => {
+  // "via" only after something, so "Via Carota" stays a name
+  text = text.replace(/(?:(?:^|[\s,;])(?:from|thanks to|recommended by|rec by)|[\s,;]via)\s+([^,;.]{1,40}?)\s*(?=[,;.]|$)/i, (_, who) => {
     // "from apartments" names a category, not a person; the category was already read from it
     if (!isCategoryWord(who.trim())) from = cap(who.trim());
     return '';
@@ -165,6 +168,8 @@ function parse(raw, override, fallbackCat, been) {
     where = titleCase(parts.shift());
     // "Shoreditch, London" keeps the city with the neighborhood
     if (parts.length && CITIES.includes(parts[0].toLowerCase())) where += ', ' + titleCase(parts.shift());
+    // A pasted address keeps its city, state and zip: "5521 Greenville Ave, Dallas, TX 75206"
+    if (ADDRESS.test(where)) while (parts.length && (STATEZIP.test(parts[0]) || STATEZIP.test(parts[1] || ''))) where += ', ' + parts.shift();
   }
   const note = cap(parts.join(', '));
 
@@ -473,7 +478,7 @@ function render() {
   $('addBar').classList.toggle('hidden', onMap);
   $('main').classList.toggle('hidden', onMap);
   $('mapView').classList.toggle('hidden', !onMap);
-  $('addInput').placeholder = logging() ? 'Sushi Lin, Prospect Heights, yesterday' : 'Lilia, pasta, from Ana';
+  $('addInput').placeholder = addHint(r);
 
   // One controls node, moved rather than redrawn, so the segment indicator can slide
   if (onMap && $('controls').parentElement !== $('mapTop')) $('mapTop').append($('controls'));
@@ -485,6 +490,16 @@ function render() {
 
   if (detailId && items[detailId]) renderDetail();
   else if (detailId) closeSheet();
+}
+
+// The add box hint spells out what the parser reads here: "in" sets where, "from" sets who
+function addHint(r) {
+  if (logging()) return 'Place, neighborhood or address';
+  if (r.view !== 'cat') return 'Name in neighborhood, from who';
+  if (r.cat === 'Apartments') return 'Address, what you thought';
+  if (r.cat === 'Recipes') return 'Dish or link, from who';
+  if (CAT[r.cat].action === 'map') return 'Name in neighborhood, from who';
+  return 'Title or link, from who';
 }
 
 function renderControls() {
