@@ -74,7 +74,10 @@ const normCity = c => BOROUGHS.includes((c || '').trim().toLowerCase()) ? 'New Y
 function cityFromWhere(w) {
   if (!w) return '';
   if (ADDRESS.test(w) && !w.includes(',')) return '';
-  if (w.includes(',')) return titleCase(normCity(w.split(',').pop()));
+  // A pasted address ends in a state, zip or country: "…, Dallas, TX 75206" → Dallas
+  const parts = w.split(',').map(x => x.trim()).filter(x => x && !/^([a-z]{2}\s*)?\d{5}(-\d{4})?$|^[a-z]{2}$|^(usa?|united states)$/i.test(x));
+  if (parts.length > 1) return titleCase(normCity(parts.at(-1)));
+  if (w.includes(',')) return '';
   if ([...BOROUGHS, ...NYC_HOODS].some(h => wordRe(h).test(w))) return 'New York';
   return titleCase(w);
 }
