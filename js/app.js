@@ -73,6 +73,7 @@ const normCity = c => BOROUGHS.includes((c || '').trim().toLowerCase()) ? 'New Y
 // "Prospect Heights" → New York, "Shoreditch, London" → London, "Lagos" → Lagos
 function cityFromWhere(w) {
   if (!w) return '';
+  if (ADDRESS.test(w) && !w.includes(',')) return '';
   if (w.includes(',')) return titleCase(normCity(w.split(',').pop()));
   if ([...BOROUGHS, ...NYC_HOODS].some(h => wordRe(h).test(w))) return 'New York';
   return titleCase(w);
@@ -80,7 +81,7 @@ function cityFromWhere(w) {
 
 // "Brooklyn Prospect Heights" → Prospect Heights, "Midtown Manhattan" → Midtown, "Lagos" → none
 function hoodFromWhere(w) {
-  if (!w) return '';
+  if (!w || ADDRESS.test(w)) return '';
   let h = w.split(',')[0];
   if (!w.includes(',') && cityFromWhere(w) !== 'New York') return '';
   for (const b of BOROUGHS) h = h.replace(wordRe(b), ' ');
@@ -415,6 +416,7 @@ const logging = () => status === 'tried' || status === 'loved';
 
 function route() {
   const h = decodeURIComponent(location.hash.replace(/^#\/?/, ''));
+  if (h.startsWith('s/')) return { view: 'shared', key: h.slice(2) };
   if (h === 'map') return { view: 'map' };
   if (CAT[h]) return { view: 'cat', cat: h };
   return { view: 'home' };
@@ -432,6 +434,10 @@ function scope() {
 // ── Rendering ──
 function render() {
   const r = route();
+  if (r.view === 'shared') { renderShared(); return; }
+  $('sharedView').classList.add('hidden');
+  $('login').classList.add('hidden');
+  $('app').classList.remove('hidden');
   const onMap = r.view === 'map';
   $('backBtn').classList.toggle('hidden', r.view !== 'cat');
   $('title').textContent = r.view === 'cat' ? r.cat : onMap ? 'Map' : 'Recs';
@@ -467,6 +473,7 @@ function renderControls() {
   const shown = scope().filter(r => statusMatch(r) && placeMatch(r));
   $('placeLabel').textContent = place.hood || place.city || 'Everywhere';
   $('placeBtn').classList.toggle('on', !!place.city);
+  $('shareListBtn').classList.toggle('hidden', !shown.length);
   $('countLabel').textContent = shown.length ? `${shown.length} ${route().view === 'map' ? (shown.length === 1 ? 'place' : 'places') : (shown.length === 1 ? 'item' : 'items')}` : '';
   $('controls').classList.toggle('hidden', route().view === 'home' && (!!query || !all().length));
 }
@@ -582,24 +589,49 @@ function sheetHead(title) {
   </div>`;
 }
 
+const openCities = new Set();
+
 function openPlaces() {
   detailId = null;
   const { total, cities } = placeOptions();
+  if (place.city) openCities.add(place.city);
   const opt = (city, hood, label, count, sub) => {
     const on = place.city === city && place.hood === hood;
     return `<button class="opt ${sub ? 'sub' : ''} ${on ? 'on' : ''}" data-place="${esc(city)}" data-hood="${esc(hood)}">
       <span class="opt-name">${esc(label)}</span><span class="opt-count">${count}</span>
     </button>`;
   };
+  // A city with neighborhoods opens and closes; "All of" inside it picks the whole city
+  const city = c => {
+    const hoods = Object.entries(c.hoods).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+    if (!hoods.length) return opt(c.name, '', c.name, c.count);
+    const open = openCities.has(c.name);
+    return `<div class="city ${open ? 'open' : ''}">
+      <button class="opt city-head ${place.city === c.name ? 'on' : ''}" data-toggle-city="${esc(c.name)}" aria-expanded="${open}">
+        <span class="opt-name">${ICON.chevron}${esc(c.name)}</span><span class="opt-count">${c.count}</span>
+      </button>
+      <div class="hoods"><div>
+        ${opt(c.name, '', `All of ${c.name}`, c.count, true)}
+        ${hoods.map(([h, n]) => opt(c.name, h, h, n, true)).join('')}
+      </div></div>
+    </div>`;
+  };
   $('sheet').innerHTML = `${sheetHead('Where')}
     <div class="list opts">
       ${opt('', '', 'Everywhere', total)}
-      ${cities.map(c => opt(c.name, '', c.name, c.count) +
-        Object.entries(c.hoods).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([h, n]) => opt(c.name, h, h, n, true)).join('')).join('')}
+      ${cities.map(city).join('')}
     </div>
     ${cities.length ? '' : '<p class="hint">Places get a city once they have a neighborhood or are found on the map.</p>'}`;
   delete $('sheet').dataset.id;
   openSheet();
+}
+
+function toggleCity(btn) {
+  const el = btn.closest('.city');
+  const open = el.classList.toggle('open');
+  btn.setAttribute('aria-expanded', open);
+  if (open) openCities.add(btn.dataset.toggleCity);
+  else openCities.delete(btn.dataset.toggleCity);
 }
 
 function listSheet(title, recs) {
@@ -749,7 +781,8 @@ function detailParts(r) {
       where = '<p class="hint">Not on the map yet. Put its street address in Where to pin it.</p>';
     }
   }
-  return { actions: `<a class="btn" href="${esc(act.url)}" target="_blank" rel="noopener">${act.label}</a>${tell}`, when, where };
+  const share = '<button class="btn sec" data-share-one>Share</button>';
+  return { actions: `<a class="btn" href="${esc(act.url)}" target="_blank" rel="noopener">${act.label}</a>${tell}${share}`, when, where };
 }
 
 function renderDetail() {
@@ -863,7 +896,8 @@ function openAccount() {
       <h2>${esc(name)}</h2>
       <p>${esc(user.email || user.phoneNumber || '')}</p>
       <p class="sub">Everything is saved to this account, so it's on any phone or computer you sign in on.</p>
-      <button class="btn sec" style="width:100%" data-signout>Sign out</button>
+      <button class="btn wide" data-invite>Invite a friend</button>
+      <button class="btn sec wide" data-signout>Sign out</button>
     </div>`;
   delete $('sheet').dataset.id;
   openSheet();
@@ -903,6 +937,213 @@ function bindSheetDrag() {
   };
   sheet.addEventListener('pointerup', end);
   sheet.addEventListener('pointercancel', end);
+}
+
+// ── Sharing ──
+// A shared list travels inside the link (after the #), so nothing is stored on a server
+// and whoever opens it sees only what you chose to send
+const appUrl = () => location.origin + location.pathname + (DEMO ? '?demo' : '');
+const canZip = 'CompressionStream' in window;
+
+function b64url(bytes) {
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+const unb64url = s => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
+const pipe = async (bytes, stream) => new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(stream)).arrayBuffer());
+
+async function pack(obj) {
+  let bytes = new TextEncoder().encode(JSON.stringify(obj));
+  if (canZip) bytes = await pipe(bytes, new CompressionStream('deflate-raw'));
+  return (canZip ? 'z' : 'j') + b64url(bytes);
+}
+
+async function unpack(s) {
+  let bytes = unb64url(s.slice(1));
+  if (s[0] === 'z') bytes = await pipe(bytes, new DecompressionStream('deflate-raw'));
+  return JSON.parse(new TextDecoder().decode(bytes));
+}
+
+const r5 = n => Math.round(n * 1e5) / 1e5;
+const encodeRec = (r, notes) => [r.name, r.category, r.where || '', notes ? r.note || '' : '', r.status, r.link || '', r.lat ? r5(r.lat) : 0, r.lng ? r5(r.lng) : 0];
+// Everything from a link is untrusted: known categories and statuses only, web links only
+const decodeRec = a => ({
+  name: String(a[0] || '').slice(0, 200),
+  category: CAT[a[1]] ? a[1] : 'Other',
+  where: String(a[2] || '').slice(0, 100),
+  note: String(a[3] || '').slice(0, 500),
+  status: ['todo', 'tried', 'loved'].includes(a[4]) ? a[4] : 'todo',
+  link: /^https?:\/\//i.test(a[5]) ? String(a[5]) : '',
+  lat: Number(a[6]) || 0,
+  lng: Number(a[7]) || 0,
+});
+
+function oneLine(r) {
+  const how = { loved: 'I loved it.', tried: 'I tried it.', todo: 'On my list to try.' }[r.status];
+  return `${r.name}${r.where ? ', ' + r.where : ''}. ${how}`;
+}
+
+// "Restaurants I loved in Prospect Heights"
+function listTitle(recs) {
+  const r = route();
+  const cats = [...new Set(recs.map(x => x.category))];
+  const what = r.view === 'cat' ? r.cat : cats.length === 1 && cats[0] !== 'Other' ? cats[0] : recs.every(isPlace) ? 'Places' : 'Things';
+  const where = place.hood || place.city;
+  const t = {
+    all: r.view === 'home' ? 'My recs' : `${what} on my list`,
+    todo: `${what} I want to try`,
+    tried: `${what} I've tried`,
+    loved: `${what} I loved`,
+  }[status];
+  return t + (where ? ` in ${where}` : '');
+}
+
+let shareState = null;
+
+function openShare(recs, title) {
+  detailId = null;
+  shareState = { recs: recs.slice(0, 100), title, notes: true, url: '' };
+  const names = shareState.recs.slice(0, 4).map(r => r.name).join(', ') + (recs.length > 4 ? ` and ${recs.length - 4} more` : '');
+  $('sheet').innerHTML = `${sheetHead(recs.length === 1 ? 'Share' : `Share ${recs.length}`)}
+    <label class="field"><span>Title</span><input id="shareTitle" value="${esc(title)}" /></label>
+    <p class="hint">${esc(names)}</p>
+    <label class="toggle"><span>Include my notes</span><input type="checkbox" id="shareNotes" checked /></label>
+    <button class="btn wide" data-share-go>Share link</button>
+    <p class="hint">Whoever opens the link sees ${recs.length === 1 ? 'this' : 'these'} and can save ${recs.length === 1 ? 'it' : 'any of them'} to their own Recs. Nothing else of yours is visible.</p>`;
+  delete $('sheet').dataset.id;
+  openSheet();
+  buildShareUrl();
+}
+
+// Built ahead of the tap, because iOS only lets a page open the share sheet straight from a tap
+async function buildShareUrl() {
+  const s = shareState;
+  if (!s) return;
+  s.url = '';
+  const by = (user?.displayName || '').split(' ')[0];
+  const key = await pack({ v: 1, by, t: s.title, i: s.recs.map(r => encodeRec(r, s.notes)) });
+  if (shareState === s) s.url = `${appUrl()}#/s/${key}`;
+}
+
+function shareOut(title, text, url) {
+  if (navigator.share) return navigator.share({ title, text, url }).then(() => true, () => false);
+  return navigator.clipboard.writeText(`${text}\n${url}`).then(() => { toast('Link copied'); return true; }, () => false);
+}
+
+function doShare() {
+  const s = shareState;
+  if (!s?.url) { toast('One moment'); return; }
+  const text = s.recs.length === 1 && s.title === s.recs[0].name ? oneLine(s.recs[0]) : s.title;
+  shareOut(s.title, text, s.url).then(ok => { if (ok) closeSheet(); });
+}
+
+function invite() {
+  shareOut('Recs', 'This is what I use to keep track of things people recommend. Open it in Safari, sign in with Google, then tap Share and Add to Home Screen.', appUrl());
+}
+
+// ── Opening a shared list ──
+let shared = null;
+let signIn = () => {};
+const PENDING = 'recs-pending';
+
+async function renderShared() {
+  const key = route().key;
+  $('login').classList.add('hidden');
+  $('app').classList.add('hidden');
+  $('sharedView').classList.remove('hidden');
+  closeSheet();
+  if (!shared || shared.key !== key) {
+    shared = { key };
+    try {
+      const data = await unpack(key);
+      shared.by = String(data.by || '').slice(0, 40);
+      shared.title = String(data.t || 'Recs').slice(0, 120);
+      shared.recs = (Array.isArray(data.i) ? data.i : []).map(decodeRec).filter(r => r.name);
+    } catch {
+      shared.error = true;
+    }
+    if (shared.key !== key) return;
+    window.scrollTo(0, 0);
+  }
+  drawShared();
+  flushPending();
+}
+
+const isSaved = r => all().some(x => x.name.toLowerCase() === r.name.toLowerCase() && x.category === r.category);
+
+function drawShared() {
+  const s = shared;
+  const v = $('sharedView');
+  if (s.error) {
+    v.innerHTML = `<div class="none"><p>This link didn't open.</p><p class="sub">It may have been cut off when it was copied. Ask for it again.</p>
+      <button class="btn-primary" data-go-home>Open Recs</button></div>`;
+    return;
+  }
+  const by = s.by || 'A friend';
+  const mixed = new Set(s.recs.map(r => r.category)).size > 1;
+  const signedIn = !!store;
+  const left = s.recs.filter(r => !isSaved(r)).length;
+  const rows = s.recs.map((r, i) => {
+    const did = { loved: `${by} loved it`, tried: `${by} tried it` }[r.status];
+    const meta = [mixed && r.category, r.where, did].filter(Boolean).join(' · ');
+    const act = action(r);
+    const saved = signedIn && isSaved(r);
+    return `<div class="row">
+      ${mark(r)}
+      <a class="row-body" href="${esc(act.url)}" target="_blank" rel="noopener">
+        <div class="row-name">${esc(r.name)}</div>
+        ${r.note ? `<div class="row-note wrap">${esc(r.note)}</div>` : ''}
+        <div class="row-meta">${esc(meta)}</div>
+      </a>
+      ${saved ? '<span class="row-act saved">Saved</span>' : `<button class="row-act" data-save="${i}">Save</button>`}
+    </div>`;
+  }).join('');
+  const cta = !signedIn ? 'Save to my Recs'
+    : left ? `Save ${left === 1 && s.recs.length === 1 ? 'it' : left === s.recs.length ? `all ${left}` : `the other ${left}`} to my Recs`
+    : '';
+  v.innerHTML = `
+    <header class="shared-head">
+      <p class="eyebrow">From ${esc(by)}</p>
+      <h1>${esc(s.title)}</h1>
+    </header>
+    <div class="list">${rows}</div>
+    <div class="shared-foot">
+      ${cta ? `<button class="btn-primary" data-save-all>${cta}</button>` : ''}
+      ${signedIn
+        ? `<button class="link-btn" data-go-home>Open my Recs</button>`
+        : '<p class="hint">Recs keeps what people tell you to try, in one place, so you can find it later. Free, with your Google account.</p>'}
+    </div>`;
+}
+
+function saveShared(list) {
+  let n = 0;
+  for (const r of list) {
+    if (isSaved(r)) continue;
+    const now = Date.now();
+    const rec = { name: r.name, category: r.category, note: r.note, from: shared.by, where: r.where, link: r.link, image: '', status: 'todo', createdAt: now, updatedAt: now };
+    if (r.lat && r.lng) Object.assign(rec, { lat: r.lat, lng: r.lng, geo: 'ok' });
+    items[store.add(rec)] = rec;
+    n++;
+  }
+  toast(n ? `Saved ${n === 1 ? list.find(r => r.name)?.name : n + ' recs'}` : 'Already saved');
+  drawShared();
+}
+
+// Save after signing in, if that's what the sign-in was for
+function flushPending() {
+  if (!store || !shared?.recs || route().view !== 'shared') return;
+  let pending = null;
+  try { pending = JSON.parse(sessionStorage.getItem(PENDING)); sessionStorage.removeItem(PENDING); } catch {}
+  if (pending?.key !== shared.key) return;
+  saveShared(pending.all ? shared.recs : pending.idx.map(i => shared.recs[i]).filter(Boolean));
+}
+
+function wantSave(idx) {
+  const list = idx === null ? shared.recs : [shared.recs[idx]];
+  if (store) { saveShared(list); return; }
+  try { sessionStorage.setItem(PENDING, JSON.stringify({ key: shared.key, all: idx === null, idx: idx === null ? [] : [idx] })); } catch {}
+  signIn();
 }
 
 // ── Adding ──
@@ -1009,7 +1250,7 @@ function bindEvents() {
 
   window.addEventListener('hashchange', () => {
     closeSheet();
-    render();
+    paint();
     window.scrollTo(0, 0);
   });
   window.addEventListener('resize', () => {
@@ -1018,7 +1259,12 @@ function bindEvents() {
 
   $('sheetWrap').addEventListener('click', e => { if (e.target === $('sheetWrap')) closeSheet(); });
 
+  $('sheet').addEventListener('input', e => {
+    if (e.target.id === 'shareTitle' && shareState) { shareState.title = e.target.value.trim() || 'Recs'; buildShareUrl(); }
+  });
+
   $('sheet').addEventListener('change', e => {
+    if (e.target.id === 'shareNotes' && shareState) { shareState.notes = e.target.checked; buildShareUrl(); return; }
     const field = e.target.dataset.field;
     if (!field || !detailId) return;
     let value = e.target.value.trim();
@@ -1041,11 +1287,22 @@ function bindEvents() {
     const t = e.target;
     if (t.closest('a')) return;
 
-    const el = t.closest('[data-cat],[data-open],[data-example],[data-status],[data-status-filter],[data-places],[data-place],[data-unpinned],[data-focus],[data-setcat],[data-delete],[data-close],[data-pick],[data-pickcat],[data-signout]');
+    const el = t.closest('[data-toggle-city],[data-share-list],[data-share-one],[data-share-go],[data-invite],[data-save],[data-save-all],[data-go-home],[data-cat],[data-open],[data-example],[data-status],[data-status-filter],[data-places],[data-place],[data-unpinned],[data-focus],[data-setcat],[data-delete],[data-close],[data-pick],[data-pickcat],[data-signout]');
     if (!el) return;
     const d = el.dataset;
 
-    if (d.cat !== undefined) { navigatedIn = true; location.hash = '/' + encodeURIComponent(d.cat); }
+    if (d.toggleCity !== undefined) toggleCity(el);
+    else if (d.shareList !== undefined) {
+      const recs = scope().filter(r => statusMatch(r) && placeMatch(r)).sort(byRecent);
+      openShare(recs, listTitle(recs));
+    }
+    else if (d.shareOne !== undefined) { const r = { id: detailId, ...items[detailId] }; openShare([r], r.name); }
+    else if (d.shareGo !== undefined) doShare();
+    else if (d.invite !== undefined) invite();
+    else if (d.save !== undefined) wantSave(Number(d.save));
+    else if (d.saveAll !== undefined) wantSave(null);
+    else if (d.goHome !== undefined) location.hash = '';
+    else if (d.cat !== undefined) { navigatedIn = true; location.hash = '/' + encodeURIComponent(d.cat); }
     else if (d.open !== undefined) openDetail(d.open);
     else if (d.example !== undefined) { $('addInput').value = d.example; updatePreview(); $('addInput').focus(); }
     else if (d.statusFilter !== undefined) {
@@ -1096,6 +1353,15 @@ function start(s, u) {
   store.listen(data => { items = data; render(); queueGeo(); });
 }
 
+// Shared links open for anyone; everything else needs signing in
+function paint() {
+  if (route().view === 'shared') renderShared();
+  else if (store) render();
+  else { $('sharedView').classList.add('hidden'); $('app').classList.add('hidden'); $('login').classList.remove('hidden'); }
+}
+
+if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) $('loginTip').classList.add('hidden');
+
 bindEvents();
 
 if (DEMO) {
@@ -1107,17 +1373,16 @@ if (DEMO) {
   const db = getDatabase(app);
   let started = false;
 
-  $('loginBtn').addEventListener('click', () => {
-    signInWithPopup(auth, new GoogleAuthProvider()).catch(() => toast('Sign-in failed. Try again.'));
-  });
+  signIn = () => signInWithPopup(auth, new GoogleAuthProvider()).catch(() => toast('Sign-in failed. Try again.'));
+  $('loginBtn').addEventListener('click', signIn);
+  if (route().view === 'shared') renderShared();
 
   onAuthStateChanged(auth, u => {
     if (u && !started) {
       started = true;
       start(firebaseStore(db, u.uid), u);
     } else if (!u) {
-      $('app').classList.add('hidden');
-      $('login').classList.remove('hidden');
+      paint();
     }
   });
 }

@@ -24,6 +24,7 @@
       <h1>Recs</h1>
       <p>Everything people tell you to try, in one place.</p>
       <button id="loginBtn" class="btn-primary">Continue with Google</button>
+      <p id="loginTip" class="login-tip">On iPhone, open this in Safari, then tap Share and Add to Home Screen to keep it like an app.</p>
     </div>
   </div>
 
@@ -58,7 +59,12 @@
           <span id="placeLabel">Everywhere</span>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>
         </button>
-        <span id="countLabel" class="count-label"></span>
+        <span class="controls-right">
+          <span id="countLabel" class="count-label"></span>
+          <button id="shareListBtn" class="share-btn" data-share-list aria-label="Share these">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><polyline points="7.5 7.5 12 3 16.5 7.5"/><path d="M5 11v8a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-8"/></svg>
+          </button>
+        </span>
       </div>
     </div>
 
@@ -85,6 +91,9 @@
       </div>
     </div>
   </div>
+
+  <!-- A list someone shared; works without signing in -->
+  <div id="sharedView" class="shared hidden"></div>
 
   <div id="sheetWrap" class="sheet-wrap">
     <div id="sheet" class="sheet"></div>
