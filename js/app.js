@@ -1193,7 +1193,7 @@ function drawShared() {
   const left = s.recs.filter(r => !isSaved(r)).length;
   const rows = s.recs.map((r, i) => {
     const did = { loved: `${by} loved it`, tried: `${by} tried it` }[r.status];
-    const meta = [mixed && r.category, r.where, did].filter(Boolean).join(' · ');
+    const meta = [mixed && r.category, hoodOf(r) || (ADDRESS.test(r.where || '') ? cityOf(r) : r.where), did].filter(Boolean).join(' · ');
     const act = action(r);
     const saved = signedIn && isSaved(r);
     // Their tried/loved is said in words; the mark is for your own list, so it stays empty here
