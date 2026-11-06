@@ -95,7 +95,47 @@ function hoodFromWhere(w) {
 
 const isPlaceName = w => !!w && (cityFromWhere(w) === 'New York' || CITIES.includes(w.toLowerCase().split(',').pop().trim()));
 const cityOf = r => r.city || cityFromWhere(r.where);
-const hoodOf = r => r.hood || hoodFromWhere(r.where);
+// What you typed wins, then the New York map below. Elsewhere the map data's names are too odd to show ("Winslow").
+const hoodOf = r => hoodFromWhere(r.where) || nycHood(r.lat, r.lng);
+
+// New York neighborhoods by center point and rough size (km), named the way people say them.
+// The map data's own names are uneven here ("Manhattan Community Board 3", "Five Points").
+const NYC_MAP = [
+  ['Financial District', 40.7077, -74.0093, .7], ['Battery Park City', 40.711, -74.0169, .5], ['Tribeca', 40.7178, -74.0089, .6],
+  ['Chinatown', 40.7158, -73.997, .5], ['Little Italy', 40.7193, -73.9978, .3], ['Nolita', 40.7232, -73.9955, .35],
+  ['SoHo', 40.7233, -74.0013, .5], ['NoHo', 40.7265, -73.9935, .3], ['Two Bridges', 40.7113, -73.9922, .5],
+  ['Lower East Side', 40.7185, -73.9868, .75], ['East Village', 40.7275, -73.984, .8], ['West Village', 40.7342, -74.0056, .6],
+  ['Greenwich Village', 40.7316, -73.997, .6], ['Meatpacking', 40.7408, -74.0068, .35], ['Chelsea', 40.7465, -74.0015, .9],
+  ['Flatiron', 40.7408, -73.9897, .4], ['Union Square', 40.7359, -73.9906, .3], ['Gramercy', 40.7368, -73.9841, .45],
+  ['Kips Bay', 40.7408, -73.9776, .5], ['Murray Hill', 40.7482, -73.9788, .6], ['NoMad', 40.7447, -73.9883, .35],
+  ['Koreatown', 40.7477, -73.9867, .25], ['Midtown', 40.7568, -73.9844, 1.2], ['Midtown East', 40.7535, -73.9689, .8],
+  ["Hell's Kitchen", 40.7644, -73.9924, .9], ['Hudson Yards', 40.7545, -74.0015, .5], ['Upper East Side', 40.7736, -73.9566, 1.8],
+  ['Upper West Side', 40.787, -73.9754, 1.8], ['Morningside Heights', 40.81, -73.9625, .8], ['Harlem', 40.8116, -73.9465, 1.5],
+  ['East Harlem', 40.7947, -73.9425, 1], ['Washington Heights', 40.8417, -73.9394, 1.8], ['Inwood', 40.8677, -73.9212, 1],
+  ['Williamsburg', 40.7146, -73.9535, 1.6], ['Greenpoint', 40.7298, -73.9542, 1], ['Bushwick', 40.6958, -73.9171, 1.5],
+  ['Bed-Stuy', 40.6834, -73.9412, 1.6], ['Clinton Hill', 40.6897, -73.9653, .6], ['Fort Greene', 40.6908, -73.9766, .6],
+  ['Prospect Heights', 40.6775, -73.9692, .55], ['Crown Heights', 40.6694, -73.9422, 1.6], ['Park Slope', 40.672, -73.9778, 1.1],
+  ['Gowanus', 40.6782, -73.9888, .5], ['Carroll Gardens', 40.6795, -73.9991, .5], ['Cobble Hill', 40.6862, -73.9962, .35],
+  ['Boerum Hill', 40.6856, -73.9842, .45], ['Brooklyn Heights', 40.6961, -73.995, .6], ['Dumbo', 40.7033, -73.9881, .4],
+  ['Downtown Brooklyn', 40.6928, -73.9871, .45], ['Red Hook', 40.6751, -74.0096, .8], ['Windsor Terrace', 40.6535, -73.9772, .6],
+  ['Prospect Lefferts Gardens', 40.6587, -73.951, .7], ['Flatbush', 40.6415, -73.9594, 1.4], ['Ditmas Park', 40.6375, -73.9634, .5], ['Midwood', 40.6204, -73.9599, .9],
+  ['Sunset Park', 40.6455, -74.0124, 1.3], ['Greenwood Heights', 40.6565, -74.0, .6], ['Bay Ridge', 40.6264, -74.0299, 1.4],
+  ['Coney Island', 40.5765, -73.9929, 1.2], ['Brighton Beach', 40.5781, -73.9597, .8], ['Astoria', 40.7644, -73.9235, 1.6],
+  ['Long Island City', 40.7447, -73.9485, 1.3], ['Sunnyside', 40.7433, -73.9196, .8], ['Woodside', 40.7454, -73.9054, .9],
+  ['Jackson Heights', 40.7557, -73.8831, 1], ['Elmhurst', 40.7366, -73.8784, 1], ['Flushing', 40.7654, -73.8174, 1.5],
+  ['Ridgewood', 40.7043, -73.9018, 1], ['Forest Hills', 40.7214, -73.8448, 1.2], ['Mott Haven', 40.809, -73.9229, 1],
+  ['Arthur Avenue', 40.8553, -73.8864, .8]
+];
+const km = (a, b, c, d) => Math.hypot((a - c) * 111, (b - d) * 84);
+function nycHood(lat, lng) {
+  if (!lat || lat < 40.49 || lat > 40.92 || lng < -74.27 || lng > -73.68) return '';
+  let best = '', score = 2;  // farther than twice a neighborhood's size from all of them: no guess
+  for (const [name, la, ln, size] of NYC_MAP) {
+    const s = km(lat, lng, la, ln) / size;
+    if (s < score) [best, score] = [name, s];
+  }
+  return best;
+}
 
 // "987 Flushing Ave", "12 W 4th St", "350 Broadway"
 const ADDRESS = /^\s*\d+[a-z]?\s+[\w .'-]*?\b(ave|avenue|st|street|blvd|boulevard|rd|road|pl|place|ln|lane|dr|drive|ct|court|pkwy|parkway|ter|terrace|broadway)\b/i;
@@ -204,7 +244,8 @@ function sameName(a, b) {
   if (!a || !b) return false;
   if (a === b) return true;
   const [short, long] = a.length < b.length ? [a, b] : [b, a];
-  return long.includes(short) && short.length / long.length >= 0.5;
+  // Whole words only, so "Uncle Lou" isn't "Uncle Louie G"
+  return ` ${long} `.includes(` ${short} `) && short.length / long.length >= 0.5;
 }
 
 // "403 Madison Ave N #103" → "403 Madison Ave N"; unit numbers confuse the lookup
@@ -218,21 +259,25 @@ async function lookup(q) {
 async function geocode(r) {
   try {
     const hit = await geocodeName(r);
-    if (hit) return hit;
-    // Not in the map data by name, but its street address is
-    if (ADDRESS.test(r.where || '')) {
-      const st = street(r.where);
-      const num = st.match(/^\d+[a-z]?/i)[0].toLowerCase();
-      const city = cityOf(r);
-      const q = [st, r.where.includes(',') ? r.where.split(',').slice(1).join(' ') : '', r.city].filter(Boolean).join(' ');
-      const found = (await lookup(q)).find(f => (f.properties.housenumber || '').toLowerCase() === num
-        && (!city || city === 'New York' || normCity(f.properties.city || f.properties.county) === city));
-      if (found) return { ...found, byAddress: true };
-    }
-    return null;
+    if (!ADDRESS.test(r.where || '')) return hit;
+    // An address you gave beats a name match: the map data can hold another place with a similar name
+    const at = await geocodeAddress(r);
+    if (!at) return hit;
+    const [[x, y], [u, v]] = [hit?.geometry.coordinates || [0, 0], at.geometry.coordinates];
+    if (hit && km(y, x, v, u) < 0.3) return hit;
+    return { ...at, byAddress: true };
   } catch {
     return { error: true };
   }
+}
+
+async function geocodeAddress(r) {
+  const st = street(r.where);
+  const num = st.match(/^\d+[a-z]?/i)[0].toLowerCase();
+  const city = cityOf(r);
+  const q = [st, r.where.includes(',') ? r.where.split(',').slice(1).join(' ') : '', r.city].filter(Boolean).join(' ');
+  return (await lookup(q)).find(f => (f.properties.housenumber || '').toLowerCase() === num
+    && (!city || city === 'New York' || normCity(f.properties.city || f.properties.county) === city)) || null;
 }
 
 async function geocodeName(r) {
@@ -256,8 +301,7 @@ async function geocodeName(r) {
 function placeFields(hit, r) {
   const p = hit.properties;
   const [lng, lat] = hit.geometry.coordinates;
-  const f = { lat, lng, geo: 'ok', city: normCity(p.city || p.county || p.state || ''), hood: p.locality || p.district || '' };
-  if (BOROUGHS.includes(f.hood.toLowerCase())) f.hood = '';
+  const f = { lat, lng, geo: 'ok', city: normCity(p.city || p.county || p.state || ''), hood: nycHood(lat, lng) };
   if (r.city) delete f.city;
   if (!r.where && f.hood) f.where = f.hood;
   if (r.auto && !hit.byAddress) {
@@ -269,8 +313,11 @@ function placeFields(hit, r) {
 }
 
 // Bumped when the lookup gets better, so places it missed get another try
-const GEO_VERSION = 2;
-const wantsGeo = r => (!r.geo || (r.geo === 'none' && (r.geoTry || 0) < GEO_VERSION)) && (isPlace(r) || (r.category === 'Other' && !!r.where));
+const GEO_VERSION = 3;
+// Pins placed before addresses came first get checked against their address once
+const wantsGeo = r => (!r.geo || (r.geo === 'none' && (r.geoTry || 0) < GEO_VERSION)
+  || (r.geo === 'ok' && ADDRESS.test(r.where || '') && (r.geoV || 0) < GEO_VERSION))
+  && (isPlace(r) || (r.category === 'Other' && !!r.where));
 const geoQueue = [];
 let geoBusy = false;
 
@@ -291,7 +338,8 @@ async function pumpGeo() {
     if (hit?.error) { geoQueue.length = 0; break; }  // offline; tried again on the next data change
     // Skip if it was edited while we looked
     if (items[id] && items[id].name === r.name && items[id].where === r.where && wantsGeo({ id, ...items[id] })) {
-      const fields = hit ? { ...placeFields(hit, r), geoTry: null } : { geo: 'none', geoTry: GEO_VERSION };
+      const fields = hit ? { ...placeFields(hit, r), geoTry: null, geoV: GEO_VERSION }
+        : r.geo === 'ok' ? { geoV: GEO_VERSION } : { geo: 'none', geoTry: GEO_VERSION };
       items[id] = { ...items[id], ...fields };
       for (const k in fields) if (fields[k] === null) delete items[id][k];
       store.update(id, fields);
@@ -534,7 +582,8 @@ function mark(r) {
 
 function row(r, opts = {}) {
   const when = r.status === 'todo' ? ago(r.createdAt) : `${isPlace(r) ? 'went' : 'tried'} ${ago(beenTime(r))}`;
-  const meta = [opts.showCat && r.category, hoodOf(r) || r.where, r.from && 'from ' + r.from, when].filter(Boolean).join(' · ');
+  // A street address is too long for a row; its city says enough
+  const meta = [opts.showCat && r.category, hoodOf(r) || (ADDRESS.test(r.where || '') ? cityOf(r) : r.where), r.from && 'from ' + r.from, when].filter(Boolean).join(' · ');
   const act = action(r);
   return `<div class="row" data-open="${r.id}">
     ${mark(r)}
