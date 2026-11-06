@@ -245,7 +245,8 @@ function sameName(a, b) {
   if (a === b) return true;
   const [short, long] = a.length < b.length ? [a, b] : [b, a];
   // Whole words only, so "Uncle Lou" isn't "Uncle Louie G"
-  return ` ${long} `.includes(` ${short} `) && short.length / long.length >= 0.5;
+  // "Peter Luger" is "Peter Luger Steak House": a leading name counts even when the rest is long
+  return ` ${long} `.includes(` ${short} `) && (short.length / long.length >= 0.5 || long.startsWith(short + ' '));
 }
 
 // "403 Madison Ave N #103" → "403 Madison Ave N"; unit numbers confuse the lookup
@@ -271,27 +272,40 @@ async function geocode(r) {
   }
 }
 
+// A result must sit where you said: the right city, the right borough, near the named neighborhood.
+// No pin beats a wrong pin.
+const BORO = ['brooklyn', 'manhattan', 'queens', 'bronx', 'staten island'];
+const inNYC = (lat, lng) => lat > 40.49 && lat < 40.92 && lng > -74.27 && lng < -73.68;
+function fits(f, r) {
+  const p = f.properties;
+  const [lng, lat] = f.geometry.coordinates;
+  const city = cityOf(r);
+  if (city === 'New York') {
+    if (!inNYC(lat, lng)) return false;
+    const boro = BORO.find(b => wordRe(b).test(r.where || ''));
+    if (boro && ![p.district, p.city, p.county, p.locality].some(x => (x || '').toLowerCase().includes(boro))) return false;
+    const h = NYC_MAP.find(x => x[0].toLowerCase() === hoodFromWhere(r.where).toLowerCase());
+    return !h || km(lat, lng, h[1], h[2]) < h[3] * 2 + 1;
+  }
+  return !city || normCity(p.city || p.county).toLowerCase() === city.toLowerCase();
+}
+
 async function geocodeAddress(r) {
   const st = street(r.where);
   const num = st.match(/^\d+[a-z]?/i)[0].toLowerCase();
-  const city = cityOf(r);
   const q = [st, r.where.includes(',') ? r.where.split(',').slice(1).join(' ') : '', r.city].filter(Boolean).join(' ');
-  return (await lookup(q)).find(f => (f.properties.housenumber || '').toLowerCase() === num
-    && (!city || city === 'New York' || normCity(f.properties.city || f.properties.county) === city)) || null;
+  return (await lookup(q)).find(f => (f.properties.housenumber || '').toLowerCase() === num && fits(f, r)) || null;
 }
 
 async function geocodeName(r) {
   const addr = ADDRESS.test(r.name);
-  const city = cityOf(r);
   const queries = [[r.name, r.where, r.city].filter(Boolean).join(' ')];
   if (r.where || r.city) queries.push(r.name);
-  for (const [i, q] of queries.entries()) {
+  for (const q of queries) {
     const hit = (await lookup(q)).find(f => {
       const p = f.properties;
-      if (addr) return !!p.housenumber && r.name.trim().toLowerCase().startsWith(p.housenumber.toLowerCase());
-      if (!sameName(p.name, r.name)) return false;
-      // Without the neighborhood in the query, only trust a match in the same city
-      return i === 0 || !city || normCity(p.city || p.county) === city;
+      if (addr) return !!p.housenumber && r.name.trim().toLowerCase().startsWith(p.housenumber.toLowerCase()) && fits(f, r);
+      return sameName(p.name, r.name) && fits(f, r);
     });
     if (hit) return hit;
   }
@@ -313,10 +327,10 @@ function placeFields(hit, r) {
 }
 
 // Bumped when the lookup gets better, so places it missed get another try
-const GEO_VERSION = 3;
-// Pins placed before addresses came first get checked against their address once
+const GEO_VERSION = 4;
+// Older pins with a Where get checked once against it, and dropped if they don't fit
 const wantsGeo = r => (!r.geo || (r.geo === 'none' && (r.geoTry || 0) < GEO_VERSION)
-  || (r.geo === 'ok' && ADDRESS.test(r.where || '') && (r.geoV || 0) < GEO_VERSION))
+  || (r.geo === 'ok' && !!r.where && (r.geoV || 0) < GEO_VERSION))
   && (isPlace(r) || (r.category === 'Other' && !!r.where));
 const geoQueue = [];
 let geoBusy = false;
@@ -334,12 +348,15 @@ async function pumpGeo() {
     const id = geoQueue.shift();
     const r = items[id] && { id, ...items[id] };
     if (!r || !wantsGeo(r)) continue;
+    // An old wrong pin also saved its own city ("Jersey City" for a place you said was in Brooklyn)
+    const stale = r.city && cityFromWhere(r.where) === 'New York' && r.city !== 'New York';
+    if (stale) r.city = '';
     const hit = await geocode(r);
     if (hit?.error) { geoQueue.length = 0; break; }  // offline; tried again on the next data change
     // Skip if it was edited while we looked
     if (items[id] && items[id].name === r.name && items[id].where === r.where && wantsGeo({ id, ...items[id] })) {
       const fields = hit ? { ...placeFields(hit, r), geoTry: null, geoV: GEO_VERSION }
-        : r.geo === 'ok' ? { geoV: GEO_VERSION } : { geo: 'none', geoTry: GEO_VERSION };
+        : { geo: 'none', geoTry: GEO_VERSION, lat: null, lng: null, hood: null, ...(stale && { city: null }) };
       items[id] = { ...items[id], ...fields };
       for (const k in fields) if (fields[k] === null) delete items[id][k];
       store.update(id, fields);
@@ -1179,8 +1196,9 @@ function drawShared() {
     const meta = [mixed && r.category, r.where, did].filter(Boolean).join(' · ');
     const act = action(r);
     const saved = signedIn && isSaved(r);
+    // Their tried/loved is said in words; the mark is for your own list, so it stays empty here
     return `<div class="row">
-      ${mark(r)}
+      ${mark({ status: 'todo' })}
       <a class="row-body" href="${esc(act.url)}" target="_blank" rel="noopener">
         <div class="row-name">${esc(r.name)}</div>
         ${r.note ? `<div class="row-note wrap">${esc(r.note)}</div>` : ''}
