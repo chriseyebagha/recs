@@ -454,8 +454,18 @@ function toast(msg, act, label = 'Undo') {
 // Dates as the date picker reads and writes them, in your own time zone
 const pad = n => String(n).padStart(2, '0');
 const isoDay = ts => { const d = new Date(ts); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
-const fromIsoDay = v => { const [y, m, d] = v.split('-').map(Number); return new Date(y, m - 1, d, 12).getTime(); };
-const longDay = ts => new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+// How well you remember when you went: the day, just the month, or just the year (beenPrec; none means the day)
+const precOf = r => r.beenPrec || 'day';
+function whenText(ts, prec) {
+  const d = new Date(ts);
+  if (prec === 'year') return String(d.getFullYear());
+  if (prec === 'month') return `${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+// "went 3 days ago", or "went in Oct 2025" when the day isn't known
+const wentText = r => precOf(r) === 'day' ? ago(beenTime(r)) : `in ${whenText(beenTime(r), precOf(r))}`;
 
 const pref = {
   get(k, d) { try { return localStorage.getItem('recs-' + k) ?? d; } catch { return d; } },
@@ -719,7 +729,7 @@ function mark(r) {
 }
 
 function row(r, opts = {}) {
-  const when = r.status === 'todo' ? ago(r.createdAt) : `${isPlace(r) ? 'went' : 'tried'} ${ago(beenTime(r))}`;
+  const when = r.status === 'todo' ? ago(r.createdAt) : `${isPlace(r) ? 'went' : 'tried'} ${wentText(r)}`;
   // A street address is too long for a row; its city says enough
   const meta = [opts.showCat && r.category, hoodOf(r) || (ADDRESS.test(r.where || '') ? cityOf(r) : r.where), r.from && 'from ' + r.from, when].filter(Boolean).join(' · ');
   const act = action(r);
@@ -1039,10 +1049,11 @@ function renderDetail() {
     $('dCat').textContent = r.category;
     $('dActions').innerHTML = parts.actions;
     $('dWhen').textContent = parts.when;
-    const day = $('dDay');
-    day.closest('.date-row').classList.toggle('hidden', r.status === 'todo');
-    day.previousElementSibling.textContent = isPlace(r) ? 'Went' : 'Tried';
-    if (day !== document.activeElement && day.value !== isoDay(beenTime(r))) day.value = isoDay(beenTime(r));
+    const row = $('dWhenRow');
+    row.classList.toggle('hidden', r.status === 'todo');
+    row.querySelector('span').textContent = isPlace(r) ? 'Went' : 'Tried';
+    const key = `${beenTime(r)}|${precOf(r)}`;
+    if (row.dataset.key !== key) { row.dataset.key = key; $('dWhen2').innerHTML = whenPicker(r); }
     sheet.querySelectorAll('[data-setcat]').forEach(b => b.classList.toggle('on', b.dataset.setcat === r.category));
     sheet.querySelectorAll('[data-field]').forEach(el => {
       const v = r[el.dataset.field] || '';
@@ -1069,8 +1080,9 @@ function renderDetail() {
       ${[['todo', 'Want to try'], ['tried', 'Tried'], ['loved', 'Loved']].map(([s, l]) =>
         `<button class="${r.status === s ? 'on' : ''}" data-status="${s}">${l}</button>`).join('')}
     </div>
-    <label class="toggle date-row ${r.status === 'todo' ? 'hidden' : ''}"><span>${isPlace(r) ? 'Went' : 'Tried'}</span>
-      <input type="date" id="dDay" value="${isoDay(beenTime(r))}" max="${isoDay(Date.now())}" /></label>
+    <div class="toggle date-row ${r.status === 'todo' ? 'hidden' : ''}" id="dWhenRow" data-key="${beenTime(r)}|${precOf(r)}">
+      <span>${isPlace(r) ? 'Went' : 'Tried'}</span><span class="when-pick" id="dWhen2">${whenPicker(r)}</span>
+    </div>
     <div class="actions" id="dActions">${parts.actions}</div>
     <div id="dWhere" data-key="${whereKey}">${parts.where}</div>
     <label class="field"><span>Note</span><textarea data-field="note" rows="2">${esc(r.note)}</textarea></label>
@@ -1133,25 +1145,54 @@ function patch(id, fields) {
   render();
 }
 
+// When you went, as pills: what you remember is solid, what you don't is a dashed "+ day" or "+ month".
+// Each pill is the phone's own picker underneath; "Not sure" at the top of a list takes that part away.
+function whenPicker(r) {
+  const d = new Date(beenTime(r)), prec = precOf(r), now = new Date();
+  const y = d.getFullYear(), m = d.getMonth();
+  const days = new Date(y, m + 1, 0).getDate();
+  const opt = (v, label, on) => `<option value="${v}" ${on ? 'selected' : ''}>${label}</option>`;
+  const pill = (id, label, shown, opts, add) => `<label class="wp ${add ? 'add' : ''}"><span>${shown}</span>
+    <select id="${id}" aria-label="${label}">${opts}</select></label>`;
+  const dayOpts = opt('', 'Not sure', prec !== 'day') + Array.from({ length: days }, (_, i) => opt(i + 1, i + 1, prec === 'day' && d.getDate() === i + 1)).join('');
+  const monOpts = opt('', 'Not sure', prec === 'year') + MONTHS.map((n, i) => opt(i, n, prec !== 'year' && i === m)).join('');
+  const yearOpts = Array.from({ length: now.getFullYear() - Math.min(1980, y) + 1 }, (_, i) => now.getFullYear() - i).map(v => opt(v, v, v === y)).join('');
+  const day = pill('dDayD', 'Day', prec === 'day' ? d.getDate() : '+ day', dayOpts, prec !== 'day');
+  const mon = pill('dDayM', 'Month', prec === 'year' ? '+ month' : MONTHS[m], monOpts, prec === 'year');
+  const year = pill('dDayY', 'Year', y, yearOpts);
+  // Known parts in reading order, then what you could add
+  return prec === 'day' ? mon + day + year : prec === 'month' ? mon + year + day : year + mon;
+}
+
+// What the three pickers say, as a time and how exact it is. Never later than now.
+function readWhen() {
+  const d = $('dDayD')?.value || '', m = $('dDayM').value, y = Number($('dDayY').value);
+  const [ts, prec] = m === '' ? [new Date(y, 6, 1, 12), 'year']
+    : d === '' ? [new Date(y, Number(m), 15, 12), 'month']
+    : [new Date(y, Number(m), Math.min(Number(d), new Date(y, Number(m) + 1, 0).getDate()), 12), 'day'];
+  return { ts: Math.min(ts.getTime(), Date.now()), prec };
+}
+
 // Backdating: change when you went. Places from the same trip logged the same day can follow in one tap.
-function setBeenDay(id, input) {
+function setWhen(id) {
   const r = { id, ...items[id] };
-  if (!input.value) { input.value = isoDay(beenTime(r)); return; }
-  const ts = Math.min(fromIsoDay(input.value), Date.now());
+  const { ts, prec } = readWhen();
+  if (ts === beenTime(r) && prec === precOf(r)) return;
   const was = isoDay(beenTime(r));
-  if (isoDay(ts) === was) return;
-  patch(id, { beenAt: ts });
+  const fields = { beenAt: ts, beenPrec: prec === 'day' ? null : prec };
+  patch(id, fields);
   const city = cityOf(r);
   const same = city ? all().filter(x => x.id !== id && x.status !== 'todo' && cityOf(x) === city && isoDay(beenTime(x)) === was) : [];
   if (!same.length) return;
   toast(`Move ${same.length} other ${city} ${same.length === 1 ? 'place' : 'places'} too?`, () => {
     const now = Date.now();
     for (const x of same) {
-      items[x.id] = { ...items[x.id], beenAt: ts, updatedAt: now };
-      store.update(x.id, { beenAt: ts, updatedAt: now });
+      items[x.id] = { ...items[x.id], beenAt: ts, updatedAt: now, beenPrec: fields.beenPrec };
+      if (!fields.beenPrec) delete items[x.id].beenPrec;
+      store.update(x.id, { ...fields, updatedAt: now });
     }
     render();
-    toast(`Moved ${same.length + 1} places to ${longDay(ts)}`);
+    toast(`Moved ${same.length + 1} places to ${whenText(ts, prec)}`);
   }, 'Move');
 }
 
@@ -1885,7 +1926,7 @@ function save() {
   const dupe = all().find(r => r.name.toLowerCase() === p.name.toLowerCase() && (r.category === p.category || p.auto));
   // Logging a place you'd saved as a rec ticks off the rec instead of making a second one
   if (dupe && been) {
-    const fields = { status, beenAt: p.beenAt || Date.now() };
+    const fields = { status, beenAt: p.beenAt || Date.now(), beenPrec: null };
     if (!dupe.where && p.where) fields.where = p.where;
     patch(dupe.id, fields);
     done();
@@ -1975,7 +2016,7 @@ function bindEvents() {
   $('sheet').addEventListener('change', e => {
     if (e.target.id === 'shareNotes' && shareState) { shareState.notes = e.target.checked; buildShareUrl(); return; }
     if (e.target.dataset.pubKind) { setPublic(e.target.dataset.pubKind, e.target.dataset.pubLabel, e.target.checked); return; }
-    if (e.target.id === 'dDay' && detailId) { setBeenDay(detailId, e.target); return; }
+    if (['dDayD', 'dDayM', 'dDayY'].includes(e.target.id) && detailId) { setWhen(detailId); return; }
     if (e.target.id === 'pubNotes') { savePublic({ ...pubCfg, notes: e.target.checked }); return; }
     if (e.target.id === 'pubName') { renamePub(e.target.value); return; }
     const field = e.target.dataset.field;
