@@ -1,4 +1,4 @@
-const CACHE_NAME = 'recs-v20';
+const CACHE_NAME = 'recs-v21';
 const ASSETS = [
   './',
   './index.html',

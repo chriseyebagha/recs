@@ -219,6 +219,13 @@ function parse(raw, override, fallbackCat, been) {
     to = f;
     return ' ';
   });
+  // Not a friend yet: still a person when "for" starts its own part or ends the line, and the word isn't a kind of use
+  if (!to) text = text.replace(/(^|[,;]\s*|\s)for\s+@?([\p{L}'-]{2,20})\s*$|([,;]\s*)for\s+@?([\p{L}'-]{2,20})\s*(?=[,;])/iu, (m, a, w1, b, w2) => {
+    const w = w1 || w2;
+    if (NOT_PEOPLE.test(w) || isCategoryWord(w)) return m;
+    to = { by: cap(w) };
+    return ' ';
+  });
   text = text.replace(/\s+/g, ' ').trim();
 
   let category = override || guessCategory(text, link);
@@ -523,6 +530,9 @@ function firebaseStore(db, uid) {
     send(toUid, item) { return set(push(ref(db, `inbox/${toUid}`)), item); },
     // Ideas everyone can see and vote on
     listenIdeas(cb) { onValue(ref(db, 'ideas'), snap => cb(snap.val() || {}), () => cb({})); },
+    listenSent(cb) { onValue(ref(db, `users/${uid}/sent`), snap => cb(snap.val() || {})); },
+    addSent(v) { set(push(ref(db, `users/${uid}/sent`)), v); },
+    dropSent(id) { dbRemove(ref(db, `users/${uid}/sent/${id}`)); },
     addIdea(v) { return set(push(ref(db, 'ideas')), v); },
     vote(id, on) { const r = ref(db, `ideas/${id}/votes/${uid}`); return on ? set(r, true) : dbRemove(r); },
     ideaStatus(id, st) { return set(ref(db, `ideas/${id}/status`), st); },
@@ -606,6 +616,7 @@ function demoStore() {
   const inbox = kept('recs-demo-inbox', {
     i1: { name: 'Dishoom', category: 'Restaurants', note: 'Get the black daal. Worth the line', where: 'Covent Garden, London', st: 'loved', from: 'Daksh', fromName: 'daksh', fromUid: 'd-daksh', at: now - 2 * 3600e3 },
   });
+  const sentKept = kept('recs-demo-sent', {});
   const ideas = kept('recs-demo-ideas', {
     a1: { uid: 'd-ana', by: 'Ana', text: 'Sort what I want to try by distance when I travel', at: now - 3 * day, votes: { 'd-tunde': true, 'd-daksh': true } },
     a2: { uid: 'd-tunde', by: 'Tunde', text: 'Bring in my saved places from Google Maps', at: now - 6 * day, votes: { 'd-ana': true }, status: 'planned' },
@@ -618,6 +629,9 @@ function demoStore() {
     dropInbox(id) { const v = { ...inbox.get() }; delete v[id]; inbox.put(v); },
     send: () => Promise.resolve(),
     listenIdeas: ideas.listen,
+    listenSent: sentKept.listen,
+    addSent(x) { sentKept.put({ ...sentKept.get(), ['s' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5)]: x }); },
+    dropSent(id) { const v = { ...sentKept.get() }; delete v[id]; sentKept.put(v); },
     addIdea(x) { ideas.put({ ...ideas.get(), ['i' + Date.now().toString(36)]: x }); return Promise.resolve(); },
     vote(id, on) { const v = structuredClone(ideas.get()); v[id].votes ??= {}; if (on) v[id].votes.demo = true; else delete v[id].votes.demo; ideas.put(v); return Promise.resolve(); },
     ideaStatus(id, st) { const v = structuredClone(ideas.get()); v[id].status = st; ideas.put(v); return Promise.resolve(); },
@@ -706,6 +720,7 @@ function route() {
   }
   if (h === 'map') return { view: 'map' };
   if (h === 'usage') return { view: 'usage' };
+  if (h === 'sent') return { view: 'sent' };
   if (CAT[h]) return { view: 'cat', cat: h };
   return { view: 'home' };
 }
@@ -725,6 +740,7 @@ function render() {
   if (r.view === 'shared') { renderShared(); return; }
   if (r.view === 'pub') { renderPub(); return; }
   if (r.view === 'usage') { renderUsage(); return; }
+  if (r.view === 'sent') { renderSent(); return; }
   document.title = 'Recs';
   $('sharedView').classList.add('hidden');
   $('login').classList.add('hidden');
@@ -1394,6 +1410,7 @@ function openAccount() {
       <p class="sub">Everything is saved to this account, so it's on any phone or computer you sign in on.</p>
     </div>
     <div class="list opts">
+      <a class="opt" href="#/sent"><span class="opt-name">Sent by me</span><span class="opt-count">${Object.keys(sent).length || ''} ${ICON.chevron}</span></a>
       <button class="opt" data-friends><span class="opt-name">Friends</span><span class="opt-count">${friendList().length || 'Add'} ${ICON.chevron}</span></button>
       <button class="opt" data-pub-manage><span class="opt-name">Public page</span><span class="opt-count">${pubCfg.name ? esc(listJoin(pubLabels()) || 'Nothing on it') : 'Off'} ${ICON.chevron}</span></button>
       <button class="opt" data-ideas><span class="opt-name">Ideas</span><span class="opt-count">Suggest or vote ${ICON.chevron}</span></button>
@@ -2097,7 +2114,23 @@ function findFriend(word) {
   return friendList().find(f => f.name === w || f.by.toLowerCase() === w) || null;
 }
 
+// Everything you recommend to someone, kept apart from your own list
+function keepSent(to, recs) {
+  const at = Date.now();
+  for (const r of recs.slice(0, 20)) store.addSent({ name: r.name, category: r.category, note: r.note || '', where: r.where || '', link: webUrl(r.link), to: to.by, toName: to.name || '', at });
+}
+
+// Not a friend: the phone's share sheet with a link to just this. Built without waiting, so iPhone allows it from the tap.
+function sendLink(to, r) {
+  const key = 'j' + b64url(new TextEncoder().encode(JSON.stringify({ v: 1, by: firstName(), t: `For ${to.by}`, i: [encodeRec(r, true)] })));
+  keepSent(to, [r]);
+  track('send_link');
+  return shareOut(`${firstName()} recommends ${r.name}`, `${to.by}, try ${r.name}${r.note ? `. ${r.note}` : ''}`, `${appUrl()}#/s/${key}`);
+}
+
 function sendTo(friend, recs) {
+  if (!friend.uid) return Promise.resolve(false);
+  keepSent(friend, recs);
   const at = Date.now();
   const out = recs.slice(0, 20).map(r => ({
     name: r.name, category: r.category, note: r.note || '', where: r.where || '', city: r.city || '',
@@ -2106,7 +2139,7 @@ function sendTo(friend, recs) {
   }));
   return Promise.all(out.map(x => store.send(friend.uid, x))).then(() => {
     track('send');
-    toast(`Sent ${out.length === 1 ? out[0].name : `${out.length} recs`} to ${friend.by}`);
+    toast(`Sent ${out.length === 1 ? out[0].name : `${out.length} recs`} to ${friend.by}`, () => { location.hash = '/sent'; }, 'See sent');
     return true;
   }, () => {
     toast(`Couldn't send to ${friend.by} yet. The database rules need the inbox part.`);
@@ -2240,9 +2273,41 @@ function drawFriends() {
   $('sheet').dataset.view = 'friends';
 }
 
+// ── Sent by me: what you recommended to others. Its own page, never mixed into your list. ──
+let sent = {};
+function renderSent() {
+  $('login').classList.add('hidden');
+  $('app').classList.add('hidden');
+  $('sharedView').classList.remove('hidden');
+  closeSheet();
+  document.title = 'Sent by me';
+  const v = $('sharedView');
+  v.dataset.key = '';
+  const list = Object.entries(sent).sort((a, b) => (b[1].at || 0) - (a[1].at || 0));
+  const people = new Set(list.map(([, x]) => x.to)).size;
+  v.innerHTML = `
+    <header class="shared-head">
+      <button class="eyebrow link-back" data-go-home>Recs</button>
+      <h1>Sent by me</h1>
+      <p class="trip-sub">${list.length ? `${list.length} ${list.length === 1 ? 'rec' : 'recs'} to ${people} ${people === 1 ? 'person' : 'people'}` : 'What you recommend to friends shows here. Write "for Daksh" when you add one, or use Share.'}</p>
+    </header>
+    ${list.length ? `<div class="list">${list.map(([id, x]) => `<div class="row">
+      <div class="row-body">
+        <div class="row-name">${esc(x.name)}</div>
+        ${x.note ? `<div class="row-note">${esc(x.note)}</div>` : ''}
+        <div class="row-meta">${esc(['for ' + x.to, knownCat(x.category, x), x.at && ago(x.at)].filter(Boolean).join(' · '))}</div>
+      </div>
+      <button class="in-x" data-unsent="${esc(id)}" aria-label="Remove from this list">${ICON.x}</button>
+    </div>`).join('')}</div>` : ''}
+    <div class="shared-foot"><button class="link-btn" data-go-home>Open my Recs</button></div>`;
+}
+
 // ── Who you went with ──
 // Yours to add and remove. A tagged friend gets "went with you" and can add it to their own list in one tap;
 // their copy is theirs. On your public page, whoever you tagged shows with the place.
+// "good for kids", "for two", "for brunch" are uses, not people
+const NOT_PEOPLE = /^(kids?|children|dates?|date night|two|one|three|four|groups?|everyone|all|me|us|you|them|him|her|lunch|dinner|brunch|breakfast|drinks|work|free|sale|rent|now|later|fun|real|sure|life|good|cheap|less|days?|weeks?|months?|years?|hours?|vegans?|vegetarians?|families|family|couples?|friends?|beginners?|summer|winter|spring|fall)$/i;
+
 const withObj = list => Object.fromEntries(list.map(w => w.name ? [w.name, { by: w.by, uid: w.uid }] : ['p-' + slug(w.by), { by: w.by }]));
 
 function tellWith(r, keys) {
@@ -2458,7 +2523,7 @@ function updatePreview() {
 // The add button says what will happen: save it, or send it
 function sendMode(to) {
   const b = $('addBtn');
-  const mode = to ? 'send' : 'save';
+  const mode = to ? 'send:' + to.by : 'save';
   if (b.dataset.mode === mode) return;
   b.dataset.mode = mode;
   b.innerHTML = to ? ICON.send : ICON.plus;
@@ -2527,7 +2592,9 @@ function save() {
   const done = () => { input.value = ''; override = null; updatePreview(); input.blur(); };
   // Written for a friend: it goes to them, not into your list
   if (p.to) {
-    sendTo(p.to, [{ name: p.name, category: p.category, note: p.note, where: p.where, link: p.link, status: 'todo' }]).then(ok => { if (ok) done(); });
+    const r = { name: p.name, category: p.category, note: p.note, where: p.where, link: p.link, status: 'todo' };
+    if (p.to.uid) sendTo(p.to, [r]).then(ok => { if (ok) done(); });
+    else sendLink(p.to, r).then(ok => { if (ok) { done(); toast(`Sent ${r.name} to ${p.to.by}`, () => { location.hash = '/sent'; }, 'See sent'); } });
     return;
   }
   const dupe = all().find(r => r.name.toLowerCase() === p.name.toLowerCase() && (r.category === p.category || p.auto));
@@ -2654,11 +2721,12 @@ function bindEvents() {
     if (swiped) { swiped = false; e.preventDefault(); return; }
     if (t.closest('a')) return;
 
-    const el = t.closest('[data-unwith],[data-in-save],[data-in-drop],[data-send],[data-friends],[data-unfriend],[data-ideas],[data-vote],[data-idea-send],[data-idea-status],[data-add-friend],[data-pub-manage],[data-insert],[data-complete],[data-pub-share],[data-toggle-city],[data-share-list],[data-share-one],[data-share-go],[data-invite],[data-save],[data-save-all],[data-go-home],[data-cat],[data-open],[data-example],[data-status],[data-status-filter],[data-places],[data-place],[data-unpinned],[data-focus],[data-setcat],[data-delete],[data-close],[data-pick],[data-pickcat],[data-signout]');
+    const el = t.closest('[data-unsent],[data-unwith],[data-in-save],[data-in-drop],[data-send],[data-friends],[data-unfriend],[data-ideas],[data-vote],[data-idea-send],[data-idea-status],[data-add-friend],[data-pub-manage],[data-insert],[data-complete],[data-pub-share],[data-toggle-city],[data-share-list],[data-share-one],[data-share-go],[data-invite],[data-save],[data-save-all],[data-go-home],[data-cat],[data-open],[data-example],[data-status],[data-status-filter],[data-places],[data-place],[data-unpinned],[data-focus],[data-setcat],[data-delete],[data-close],[data-pick],[data-pickcat],[data-signout]');
     if (!el) return;
     const d = el.dataset;
 
-    if (d.unwith !== undefined) removeWith(detailId, d.unwith);
+    if (d.unsent !== undefined) store.dropSent(d.unsent);
+    else if (d.unwith !== undefined) removeWith(detailId, d.unwith);
     else if (d.inSave !== undefined) inboxSave(d.inSave);
     else if (d.inDrop !== undefined) inboxDrop(d.inDrop);
     else if (d.send !== undefined) {
@@ -2767,6 +2835,7 @@ function start(s, u) {
     syncPub();
     redrawSheet();
   });
+  store.listenSent(v => { sent = v || {}; if (route().view === 'sent') renderSent(); });
   store.listenFriends(v => { friends = v || {}; if (route().view === 'pub') { $('sharedView').dataset.key = ''; renderPub(); } redrawSheet(); });
   store.listenInbox(v => { inbox = v || {}; takeNotices(); if (route().view === 'home') render(); });
   store.isAdmin().then(v => { isAdmin = v; if (route().view === 'usage') renderUsage(); });
