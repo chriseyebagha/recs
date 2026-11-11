@@ -206,14 +206,14 @@ function parse(raw, override, fallbackCat, been) {
   // "with Monica and Ade": friends, or a capitalised name; "pasta with truffle" stays a note
   const withs = [];
   text = text.replace(/(?:^|[\s,;])with\s+([^,;.]{1,40}?)\s*(?=[,;.]|$)/giu, (m, list) => {
-    const parts = list.split(/\s+(?:and|&)\s+/i).map(x => x.trim().replace(/^@/, ''));
+    const parts = list.split(/\s+(?:and|&)\s+/i).map(x => x.trim());
     const found = parts.map(w => findFriend(w) || (/^\p{Lu}[\p{L}'-]*(\s\p{Lu}[\p{L}'-]*)?$/u.test(w) ? { by: w } : null));
     if (!found.every(Boolean)) return m;
     withs.push(...found);
     return ' ';
   });
   let to = null;
-  text = text.replace(/(?:^|[\s,;])for\s+@?([\p{L}\w-]+)(?=[\s,;.]|$)/giu, (m, w) => {
+  text = text.replace(/(?:^|[\s,;])for\s+(@?[\p{L}\w-]+)(?=[\s,;.]|$)/giu, (m, w) => {
     const f = !to && findFriend(w);
     if (!f) return m;
     to = f;
@@ -371,9 +371,10 @@ async function geocodeName(r) {
 function placeFields(hit, r) {
   const p = hit.properties;
   const [lng, lat] = hit.geometry.coordinates;
-  const f = { lat, lng, geo: 'ok', city: normCity(p.city || p.county || p.state || ''), hood: nycHood(lat, lng) };
+  const f = { lat, lng, geo: 'ok', city: normCity(p.city || p.county || p.state || '') };
   if (r.city) delete f.city;
-  if (!r.where && f.hood) f.where = f.hood;
+  const hood = nycHood(lat, lng);
+  if (!r.where && hood) f.where = hood;
   if (r.auto && !hit.byAddress) {
     const c = OSM_CATS[p.osm_value];
     if (c && c !== r.category) f.category = c;
@@ -412,7 +413,7 @@ async function pumpGeo() {
     // Skip if it was edited while we looked
     if (items[id] && items[id].name === r.name && items[id].where === r.where && wantsGeo({ id, ...items[id] })) {
       const fields = hit ? { ...placeFields(hit, r), geoTry: null, geoV: GEO_VERSION }
-        : { geo: 'none', geoTry: GEO_VERSION, lat: null, lng: null, hood: null, ...(stale && { city: null }) };
+        : { geo: 'none', geoTry: GEO_VERSION, lat: null, lng: null, ...(stale && { city: null }) };
       items[id] = { ...items[id], ...fields };
       for (const k in fields) if (fields[k] === null) delete items[id][k];
       store.update(id, fields);
@@ -711,7 +712,9 @@ const byRecent = (a, b) => sortKey(b) - sortKey(a);
 const logging = () => status === 'tried' || status === 'loved';
 
 function route() {
-  const h = decodeURIComponent(location.hash.replace(/^#\/?/, ''));
+  const raw = location.hash.replace(/^#\/?/, '');
+  let h = raw;
+  try { h = decodeURIComponent(raw); } catch {}
   if (h.startsWith('s/')) return { view: 'shared', key: h.slice(2) };
   // Public pages: #/@chris is everywhere Chris made public, #/@chris/madrid is one city
   if (h.startsWith('@')) {
@@ -1668,6 +1671,9 @@ async function claimName(want) {
       await pub.set(name, { uid: store.uid, by: firstName(), updatedAt: Date.now() });
       return name;
     } catch {
+      // Someone took it between our look and our write: try the next one. Otherwise the rules are missing.
+      const now = await pub.get(name).catch(() => null);
+      if (now && now.uid !== store.uid) continue;
       pubErr = 'setup';
       return '';
     }
@@ -1698,6 +1704,7 @@ async function setPublic(kind, label, on) {
 async function renamePub(want) {
   const old = pubCfg.name;
   const name = slug(want).slice(0, 24);
+  if (!name && want.trim()) { toast('Use letters a to z and numbers'); drawPublic(); return; }
   if (!name || name === old) { drawPublic(); return; }
   if (name.length < 2) { toast('Use at least two letters'); drawPublic(); return; }
   try {
@@ -1890,7 +1897,7 @@ function drawProfile(data, name, by) {
   const trips = decodePages(data.trips, 'trip').sort((a, b) => latest(b) - latest(a));
   const shelves = decodePages(data.shelves, 'shelf').sort((a, b) => SHELF_CATS.indexOf(a.label) - SHELF_CATS.indexOf(b.label));
   const me = !!store && data.uid === store.uid;
-  const friend = !!friends[name];
+  const friend = !!store && !!friendByUid(data.uid);
   const key = `@${name}|${data.updatedAt}|${!!store}|${friend}`;
   document.title = `${by}'s recs`;
   if (v.dataset.key === key) return;
@@ -2109,9 +2116,26 @@ let isAdmin = null;  // unknown until the database answers
 
 const friendList = () => Object.entries(friends).map(([name, f]) => ({ name, by: f.by || name, uid: f.uid }))
   .filter(f => f.uid).sort((a, b) => a.by.localeCompare(b.by));
+// "@daksh2" always means that one; "Daksh" only when one friend has that first name
 function findFriend(word) {
-  const w = String(word).toLowerCase().replace(/^@/, '');
-  return friendList().find(f => f.name === w || f.by.toLowerCase() === w) || null;
+  const w = String(word).toLowerCase();
+  const fs = friendList();
+  if (w.startsWith('@')) return fs.find(f => f.name === w.slice(1)) || null;
+  const byName = fs.filter(f => f.by.toLowerCase() === w);
+  if (byName.length) return byName.length === 1 ? byName[0] : null;  // two Dakshes: ask
+  return fs.find(f => f.name === w) || null;
+}
+// What to type to reach a friend: the first name, or @name when two friends share it
+const reachAs = f => friendList().filter(x => x.by.toLowerCase() === f.by.toLowerCase()).length > 1 ? '@' + f.name : f.by;
+const friendByUid = uid => friendList().find(f => f.uid === uid) || null;
+
+// One entry per person: if they changed their @name, the old entry is replaced, not doubled
+function rememberFriend(name, by, uid) {
+  const old = friendByUid(uid);
+  if (old && old.name === name && old.by === by) return Promise.resolve();
+  friends = { ...friends, [name]: { by, uid } };
+  if (old && old.name !== name) { delete friends[old.name]; store.setFriend(old.name, null).catch(() => {}); }
+  return store.setFriend(name, { by, uid });
 }
 
 // Everything you recommend to someone, kept apart from your own list
@@ -2123,14 +2147,12 @@ function keepSent(to, recs) {
 // Not a friend: the phone's share sheet with a link to just this. Built without waiting, so iPhone allows it from the tap.
 function sendLink(to, r) {
   const key = 'j' + b64url(new TextEncoder().encode(JSON.stringify({ v: 1, by: firstName(), t: `For ${to.by}`, i: [encodeRec(r, true)] })));
-  keepSent(to, [r]);
-  track('send_link');
-  return shareOut(`${firstName()} recommends ${r.name}`, `${to.by}, try ${r.name}${r.note ? `. ${r.note}` : ''}`, `${appUrl()}#/s/${key}`);
+  return shareOut(`${firstName()} recommends ${r.name}`, `${to.by}, try ${r.name}${r.note ? `. ${r.note}` : ''}`, `${appUrl()}#/s/${key}`)
+    .then(ok => { if (ok) { keepSent(to, [r]); track('send_link'); } return ok; });
 }
 
 function sendTo(friend, recs) {
   if (!friend.uid) return Promise.resolve(false);
-  keepSent(friend, recs);
   const at = Date.now();
   const out = recs.slice(0, 20).map(r => ({
     name: r.name, category: r.category, note: r.note || '', where: r.where || '', city: r.city || '',
@@ -2138,6 +2160,7 @@ function sendTo(friend, recs) {
     from: firstName(), fromName: pubCfg.name || '', fromUid: store.uid, at,
   }));
   return Promise.all(out.map(x => store.send(friend.uid, x))).then(() => {
+    keepSent(friend, recs);
     track('send');
     toast(`Sent ${out.length === 1 ? out[0].name : `${out.length} recs`} to ${friend.by}`, () => { location.hash = '/sent'; }, 'See sent');
     return true;
@@ -2156,8 +2179,7 @@ async function addFriend(name) {
   }
   if (!data?.uid || data.uid === store.uid) return;
   const by = String(data.by || name).slice(0, 40);
-  try { await store.setFriend(name, { by, uid: data.uid }); } catch { toast('Adding friends needs the new database rules'); return; }
-  friends = { ...friends, [name]: { by, uid: data.uid } };
+  try { await rememberFriend(name, by, data.uid); } catch { toast('Adding friends needs the new database rules'); return; }
   // Tell them, so you're on their list too
   store.send(data.uid, { kind: 'friend', name: '', from: firstName(), fromName: pubCfg.name || '', fromUid: store.uid, at: Date.now() }).catch(() => {});
   track('friend_add');
@@ -2166,16 +2188,24 @@ async function addFriend(name) {
   renderPub();
 }
 
-// Someone who adds you, or sends you something, becomes your friend too
+// Someone who adds you, or sends you something, becomes your friend too.
+// Their @name is checked against the public record first: the rules vouch for fromUid, not for the name they typed.
+const checked = new Set();
 function takeNotices() {
   for (const [id, x] of Object.entries(inbox)) {
     const name = slug(x.fromName || '');
-    if (name && x.fromUid && !friends[name] && x.fromUid !== store.uid) {
-      friends = { ...friends, [name]: { by: String(x.from || name).slice(0, 40), uid: x.fromUid } };
-      store.setFriend(name, friends[name]).catch(() => {});
-      if (x.kind === 'friend') toast(`${x.from || name} added you as a friend`);
-    }
     if (x.kind === 'friend') { store.dropInbox(id); delete inbox[id]; }
+    if (!name || !x.fromUid || x.fromUid === store.uid || checked.has(id)) continue;
+    checked.add(id);
+    const known = friendByUid(x.fromUid);
+    if (known?.name === name) continue;
+    pub.get(name).then(rec => {
+      if (rec?.uid !== x.fromUid) return;
+      const by = String(rec.by || x.from || name).slice(0, 40);
+      rememberFriend(name, by, x.fromUid).catch(() => {});
+      if (x.kind === 'friend' && !known) toast(`${by} added you as a friend`);
+      if (route().view === 'home') render();
+    }, () => {});
   }
 }
 
@@ -2506,7 +2536,7 @@ function updatePreview() {
       ${p.from ? part('from', p.from) : ''}
       ${p.note ? `<span class="pv-note">${esc(p.note)}</span>` : ''}
       ${p.link ? '<span class="pv-part"><i>link</i></span>' : ''}
-      ${p.to ? `<span class="pv-part to"><i>for</i> ${esc(p.to.by)}</span>` : ''}
+      ${p.to ? `<span class="pv-part to"><i>for</i> ${esc(p.to.uid ? reachAs(p.to) : p.to.by)}</span>` : ''}
       ${p.withs.length ? `<span class="pv-part"><i>with</i> ${esc(listJoin(p.withs.map(w => w.by)))}</span>` : ''}
       ${!p.where && place && !logging() ? add('in') : ''}
       ${!p.from && !p.to ? add('from') : ''}
@@ -2538,7 +2568,7 @@ function suggestions(raw) {
   const kw = m[1].toLowerCase();
   const typed = m[2].trim().toLowerCase();
   const seen = new Map();
-  if (kw === 'for' || kw === 'with') for (const f of friendList()) seen.set(f.by.toLowerCase(), { v: f.by, n: 1 });
+  if (kw === 'for' || kw === 'with') for (const f of friendList()) { const v = reachAs(f); seen.set(v.toLowerCase(), { v, n: 1 }); }
   else for (const r of all()) {
     for (const v of kw === 'from' ? [r.from] : [hoodOf(r), cityOf(r)]) {
       if (!v) continue;
@@ -2549,7 +2579,7 @@ function suggestions(raw) {
     }
   }
   const hits = [...seen.values()]
-    .filter(e => e.v.toLowerCase().startsWith(typed) && e.v.toLowerCase() !== typed)
+    .filter(e => (e.v.toLowerCase().startsWith(typed) || e.v.toLowerCase().startsWith('@' + typed.replace(/^@/, ''))) && e.v.toLowerCase() !== typed)
     .sort((a, b) => b.n - a.n || a.v.localeCompare(b.v))
     .slice(0, 6);
   return hits.map(e => `<button class="chip" data-complete="${esc(e.v)}">${esc(e.v)}</button>`).join('');
@@ -2591,6 +2621,8 @@ function save() {
 
   const done = () => { input.value = ''; override = null; updatePreview(); input.blur(); };
   // Written for a friend: it goes to them, not into your list
+  const same = p.to && !p.to.uid ? friendList().filter(f => f.by.toLowerCase() === p.to.by.toLowerCase()) : [];
+  if (same.length > 1) { toast(`Two friends are called ${p.to.by}. Pick ${listJoin(same.map(f => '@' + f.name)).replace(/ and (?=@[^@]*$)/, ' or ')}.`); return; }
   if (p.to) {
     const r = { name: p.name, category: p.category, note: p.note, where: p.where, link: p.link, status: 'todo' };
     if (p.to.uid) sendTo(p.to, [r]).then(ok => { if (ok) done(); });
@@ -2706,7 +2738,7 @@ function bindEvents() {
     const id = detailId;
     const fields = { [field]: value };
     // A new name or place means finding it on the map again
-    if (['name', 'where', 'city'].includes(field)) Object.assign(fields, { geo: null, lat: null, lng: null, hood: null });
+    if (['name', 'where', 'city'].includes(field)) Object.assign(fields, { geo: null, lat: null, lng: null });
     items[id] = { ...items[id], ...fields };
     for (const k in fields) if (fields[k] === null) delete items[id][k];
     store.update(id, { ...fields, updatedAt: Date.now() });
