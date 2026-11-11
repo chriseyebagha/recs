@@ -823,6 +823,7 @@ main {
   font-size: 0.88rem;
   font-weight: 600;
   white-space: nowrap;
+  max-width: calc(100vw - 32px);
   pointer-events: none;
   transition: transform 300ms var(--ease-out), opacity 200ms ease;
   display: flex;
@@ -831,6 +832,8 @@ main {
   box-shadow: var(--shadow);
 }
 
+.toast span { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.toast button { flex-shrink: 0; }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto; }
 .toast button { color: var(--bg); font-weight: 700; text-decoration: underline; }
 
@@ -952,4 +955,80 @@ main {
 
 @media (prefers-reduced-motion: reduce) {
   .hoods, .city-head svg { transition: none; }
+}
+
+/* ── Keyboard focus: a clear ring only when the keyboard put it there ── */
+.sheet:focus { outline: none; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.row:focus-visible, .opt:focus-visible { outline-offset: -2px; border-radius: var(--radius); }
+
+.sheet-sub {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-2);
+  margin: 22px 4px 8px;
+}
+
+/* ── Public pages: owner side ── */
+.pub-card {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 4px 14px 2px;
+  margin-bottom: 4px;
+}
+
+.pub-card .hint { margin: 0 0 12px; }
+.toggle.bare { background: none; padding: 10px 0; margin: 0; font-weight: 600; }
+.toggle input:disabled { opacity: 0.5; }
+
+.pub-link {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--accent);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+  margin: 0 0 12px;
+}
+
+.account + .sheet-sub { margin-top: 8px; }
+.pub-card + .toggle { margin-top: 10px; }
+.account-actions { margin-top: 22px; }
+
+/* ── Public pages: what friends see ── */
+.shared-head a.eyebrow { color: var(--accent); text-decoration: none; }
+.trip-sub { font-size: 0.9rem; color: var(--text-2); margin-top: 6px; }
+
+.pub-map {
+  position: relative;
+  height: 220px;
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin-bottom: 24px;
+  background: var(--surface-2);
+  isolation: isolate;
+}
+
+#pubMap { position: absolute; inset: 0; }
+
+.pub-h {
+  font-size: 1.1rem;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  margin: 0 4px 8px;
+}
+
+.list + .pub-h { margin-top: 24px; }
+
+.list.bare .row::before, .city-row + .city-row::before { left: 14px; }
+.city-row { text-decoration: none; color: inherit; }
+.city-row .row-name { font-size: 1.05rem; }
+.chev { color: var(--text-3); display: flex; }
+.btn-primary.as-link { display: flex; align-items: center; justify-content: center; text-decoration: none; margin: 20px auto 0; max-width: 320px; }
+
+/* A pin tapped on the map marks its row for a moment */
+.row.flash { animation: flash 1200ms var(--ease-out); }
+@keyframes flash { 0%, 30% { background: var(--accent-soft); } 100% { background: transparent; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .row.flash { animation-duration: 600ms; }
 }

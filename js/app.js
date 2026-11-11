@@ -1,5 +1,5 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-import { getDatabase, ref, onValue, push, set, update as dbUpdate, remove as dbRemove } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+import { getDatabase, ref, onValue, get, push, set, update as dbUpdate, remove as dbRemove } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 import { getAuth, setPersistence, indexedDBLocalPersistence, browserLocalPersistence, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 
 // Same Firebase project as the shopping list; data lives under users/{uid}/recs
@@ -61,7 +61,9 @@ const OSM_CATS = {
 const reEsc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const cap = s => s ? s[0].toUpperCase() + s.slice(1) : s;
 const titleCase = s => s.replace(/(^|[\s-])([a-z])/g, (_, a, b) => a + b.toUpperCase());
-const wordRe = w => new RegExp(`(^|[^a-z])${reEsc(w)}($|[^a-z])`, 'i');
+// Same input, same answer: rows ask for city and neighborhood many times a render
+const memo = f => { const m = new Map(); return s => { s = s || ''; if (!m.has(s)) m.set(s, f(s)); return m.get(s); }; };
+const wordRe = memo(w => new RegExp(`(^|[^a-z])${reEsc(w)}($|[^a-z])`, 'i'));
 
 // ── Cities and neighborhoods ──
 const BOROUGHS = ['new york city', 'staten island', 'the bronx', 'manhattan', 'new york', 'brooklyn', 'queens', 'bronx', 'nyc'];
@@ -73,7 +75,10 @@ const normCity = c => BOROUGHS.includes((c || '').trim().toLowerCase()) ? 'New Y
 const STATEZIP = /^([a-z]{2}\s*)?\d{5}(-\d{4})?$|^[a-z]{2}$|^(usa?|united states)$/i;
 
 // "Prospect Heights" → New York, "Shoreditch, London" → London, "Lagos" → Lagos
-function cityFromWhere(w) {
+const cityFromWhere = memo(w => cityFromWhereRaw(w));
+const hoodFromWhere = memo(w => hoodFromWhereRaw(w));
+
+function cityFromWhereRaw(w) {
   if (!w) return '';
   if (ADDRESS.test(w) && !w.includes(',')) return '';
   // A pasted address ends in a state, zip or country: "…, Dallas, TX 75206" → Dallas
@@ -85,7 +90,7 @@ function cityFromWhere(w) {
 }
 
 // "Brooklyn Prospect Heights" → Prospect Heights, "Midtown Manhattan" → Midtown, "Lagos" → none
-function hoodFromWhere(w) {
+function hoodFromWhereRaw(w) {
   if (!w || ADDRESS.test(w)) return '';
   let h = w.split(',')[0];
   if (!w.includes(',') && cityFromWhere(w) !== 'New York') return '';
@@ -368,7 +373,8 @@ async function pumpGeo() {
 
 // ── Row action ──
 function action(r) {
-  if (r.link) return { label: 'Open', url: r.link };
+  // Web links only: a typed "javascript:" link must never become a button
+  if (/^https?:\/\//i.test(r.link || '')) return { label: 'Open', url: r.link };
   const name = encodeURIComponent(r.name);
   const kind = ADDRESS.test(r.name) ? 'map' : CAT[r.category]?.action;
   switch (kind) {
@@ -431,12 +437,42 @@ const ICON = {
 // ── Stores ──
 function firebaseStore(db, uid) {
   const base = `users/${uid}/recs`;
+  const conf = `users/${uid}/recsPublic`;
   return {
+    uid,
     listen(cb) { onValue(ref(db, base), snap => cb(snap.val() || {})); },
     add(rec) { const r = push(ref(db, base)); set(r, rec); return r.key; },
     update(id, patch) { dbUpdate(ref(db, `${base}/${id}`), patch); },
     remove(id) { dbRemove(ref(db, `${base}/${id}`)); },
     restore(id, rec) { set(ref(db, `${base}/${id}`), rec); },
+    // Which cities you made public, and the name in your link
+    listenPublic(cb) { onValue(ref(db, conf), snap => cb(snap.val() || {})); },
+    savePublic(v) { return set(ref(db, conf), v); },
+  };
+}
+
+// Public pages: one record per person at pub/{name}, readable by anyone, written only by its owner.
+// Needs these database rules next to the existing ones:
+//   "pub": { "$name": {
+//     ".read": true,
+//     ".write": "auth != null && (data.exists() ? data.child('uid').val() === auth.uid : newData.child('uid').val() === auth.uid)",
+//     ".validate": "$name.matches(/^[a-z0-9-]{2,24}$/) && newData.child('uid').val() === auth.uid" } }
+function firebasePub(db) {
+  return {
+    get: name => get(ref(db, `pub/${name}`)).then(s => s.val()),
+    set: (name, v) => set(ref(db, `pub/${name}`), v),
+    remove: name => dbRemove(ref(db, `pub/${name}`)),
+  };
+}
+
+// Demo: the same, kept in this browser
+function demoPub() {
+  const read = () => { try { return JSON.parse(localStorage.getItem('recs-demo-pub')) || {}; } catch { return {}; } };
+  const write = d => { try { localStorage.setItem('recs-demo-pub', JSON.stringify(d)); } catch {} };
+  return {
+    get: async name => read()[name] || null,
+    set: async (name, v) => { const d = read(); d[name] = v; write(d); },
+    remove: async name => { const d = read(); delete d[name]; write(d); },
   };
 }
 
@@ -449,9 +485,15 @@ function demoStore() {
     try { localStorage.setItem('recs-demo', JSON.stringify(data)); } catch {}
     cb({ ...data });
   };
+  let conf = {};
+  try { conf = JSON.parse(localStorage.getItem('recs-demo-public')) || {}; } catch {}
+  let confCb = () => {};
   return {
+    uid: 'demo',
     listen(f) { cb = f; f({ ...data }); },
-    add(rec) { const id = 'd' + Date.now().toString(36); data[id] = rec; save(); return id; },
+    listenPublic(f) { confCb = f; f(conf); },
+    savePublic(v) { conf = v; try { localStorage.setItem('recs-demo-public', JSON.stringify(v)); } catch {} confCb(conf); return Promise.resolve(); },
+    add(rec) { const id = 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5); data[id] = rec; save(); return id; },
     update(id, patch) {
       if (!data[id]) return;
       data[id] = { ...data[id], ...patch };
@@ -479,11 +521,20 @@ function demoSeed() {
     ['Project Hail Mary', 'Books', '', 'Ana', '', 15],
     ['Hardcore History', 'Podcasts', 'Start with Blueprint for Armageddon', 'Sam', '', 40],
     ['Devoción', 'Bars & Cafes', 'Coffee, skylight room', 'Tunde', 'Williamsburg', 2],
+    // A trip, already on the map, to try public pages with
+    ['Casa Lucio', 'Restaurants', 'Huevos rotos. Book ahead', 'Marta', 'La Latina, Madrid', 24, 'loved', [40.4128, -3.7085]],
+    ['Sobrino de Botín', 'Restaurants', 'Oldest restaurant in the world. Get the suckling pig', '', 'Sol, Madrid', 25, 'tried', [40.4142, -3.7081]],
+    ['Museo del Prado', 'Places & Travel', 'Free the last two hours of the day', 'Marta', 'Retiro, Madrid', 23, 'loved', [40.4138, -3.6921]],
+    ['Salmon Guru', 'Bars & Cafes', 'Cocktails. Get there before nine', '', 'Huertas, Madrid', 24, 'loved', [40.4146, -3.6987]],
+    ['Mercado de San Miguel', 'Places & Travel', 'Busy, but good for a quick bite', '', 'Sol, Madrid', 25, 'tried', [40.4154, -3.709]],
+    ['Chocolatería San Ginés', 'Bars & Cafes', 'Churros at 2am', 'Marta', 'Sol, Madrid', 23, 'loved', [40.4168, -3.7069]],
+    ['Sala Equis', 'Places & Travel', '', 'Marta', 'Lavapiés, Madrid', 30],
   ];
-  return Object.fromEntries(rows.map(([name, category, note, from, where, daysAgo, status = 'todo'], i) => {
+  return Object.fromEntries(rows.map(([name, category, note, from, where, daysAgo, status = 'todo', ll], i) => {
     const t = now - daysAgo * day;
     const rec = { name, category, note, from, where, link: '', image: '', status, createdAt: t, updatedAt: t };
     if (status !== 'todo') rec.beenAt = t;
+    if (ll) Object.assign(rec, { lat: ll[0], lng: ll[1], geo: 'ok', geoV: GEO_VERSION });
     return [`seed${i}`, rec];
   }));
 }
@@ -513,6 +564,11 @@ const logging = () => status === 'tried' || status === 'loved';
 function route() {
   const h = decodeURIComponent(location.hash.replace(/^#\/?/, ''));
   if (h.startsWith('s/')) return { view: 'shared', key: h.slice(2) };
+  // Public pages: #/@chris is everywhere Chris made public, #/@chris/madrid is one city
+  if (h.startsWith('@')) {
+    const [name, trip = ''] = h.slice(1).split('/');
+    return { view: 'pub', name: name.toLowerCase(), trip: trip.toLowerCase() };
+  }
   if (h === 'map') return { view: 'map' };
   if (CAT[h]) return { view: 'cat', cat: h };
   return { view: 'home' };
@@ -531,6 +587,8 @@ function scope() {
 function render() {
   const r = route();
   if (r.view === 'shared') { renderShared(); return; }
+  if (r.view === 'pub') { renderPub(); return; }
+  document.title = 'Recs';
   $('sharedView').classList.add('hidden');
   $('login').classList.add('hidden');
   $('app').classList.remove('hidden');
@@ -602,7 +660,7 @@ function row(r, opts = {}) {
   // A street address is too long for a row; its city says enough
   const meta = [opts.showCat && r.category, hoodOf(r) || (ADDRESS.test(r.where || '') ? cityOf(r) : r.where), r.from && 'from ' + r.from, when].filter(Boolean).join(' · ');
   const act = action(r);
-  return `<div class="row" data-open="${r.id}">
+  return `<div class="row" data-open="${r.id}" tabindex="0">
     ${mark(r)}
     <div class="row-body">
       <div class="row-name">${esc(r.name)}</div>
@@ -700,6 +758,7 @@ const openCities = new Set();
 
 function openPlaces() {
   detailId = null;
+  shareState = null;
   const { total, cities } = placeOptions();
   if (place.city) openCities.add(place.city);
   const opt = (city, hood, label, count, sub) => {
@@ -743,6 +802,7 @@ function toggleCity(btn) {
 
 function listSheet(title, recs) {
   detailId = null;
+  shareState = null;
   $('sheet').innerHTML = `${sheetHead(title)}
     <p class="hint">Open one and put its street address in Where to pin it.</p>
     <div class="list">${recs.map(r => row(r)).join('')}</div>`;
@@ -760,6 +820,8 @@ const dark = matchMedia('(prefers-color-scheme: dark)');
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
 const styleUrl = () => `https://tiles.openfreemap.org/styles/${dark.matches ? 'dark' : 'positron'}`;
 const ML = 'https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/4.7.1/maplibre-gl';
+// Every map follows the phone into dark mode and back
+dark.addEventListener('change', () => { for (const m of [map, mini, pubMap]) try { m?.setStyle(styleUrl()); } catch {} });
 
 function loadMap() {
   if (window.maplibregl) return Promise.resolve(window.maplibregl);
@@ -812,7 +874,6 @@ async function renderMap() {
     map.addControl(new ml.AttributionControl({ compact: true }), 'bottom-right');
     // Credit stays a small (i) until tapped
     map.on('load', () => document.querySelector('#map .maplibregl-ctrl-attrib')?.classList.remove('maplibregl-compact-show'));
-    dark.addEventListener('change', () => { map.setStyle(styleUrl()); });
   }
   map.resize();
   markers.forEach(m => m.remove());
@@ -841,6 +902,12 @@ async function renderMap() {
 function focusOnMap(id) {
   const r = items[id];
   if (!r?.lat) return;
+  // Already on the map: no hash change will close the sheet, so close it here
+  if (route().view === 'map' && map) {
+    closeSheet();
+    map.easeTo({ center: [r.lng, r.lat], zoom: 16, duration: reduceMotion.matches ? 0 : 500 });
+    return;
+  }
   focusing = true;
   navigatedIn = true;
   location.hash = '/map';
@@ -888,6 +955,8 @@ function detailParts(r) {
       where = '<p class="hint">Not on the map yet. Put its street address in Where to pin it.</p>';
     }
   }
+  // The picture arrives after saving, so it lives in the part that redraws
+  if (r.image) where += `<img class="hero" src="${esc(r.image)}" alt="" loading="lazy" />`;
   const share = '<button class="btn sec" data-share-one>Share</button>';
   return { actions: `<a class="btn" href="${esc(act.url)}" target="_blank" rel="noopener">${act.label}</a>${tell}${share}`, when, where };
 }
@@ -897,7 +966,7 @@ function renderDetail() {
   const parts = detailParts(r);
   const sheet = $('sheet');
   const i = ['todo', 'tried', 'loved'].indexOf(r.status);
-  const whereKey = `${r.lat},${r.lng},${r.geo},${r.category}`;
+  const whereKey = `${r.lat},${r.lng},${r.geo},${r.category},${r.image}`;
 
   // Same item already open: update in place so inputs keep focus and the segment can slide
   if (sheet.dataset.id === detailId) {
@@ -935,7 +1004,6 @@ function renderDetail() {
     </div>
     <div class="actions" id="dActions">${parts.actions}</div>
     <div id="dWhere" data-key="${whereKey}">${parts.where}</div>
-    ${r.image ? `<img class="hero" src="${esc(r.image)}" alt="" loading="lazy" />` : ''}
     <label class="field"><span>Note</span><textarea data-field="note" rows="2">${esc(r.note)}</textarea></label>
     <label class="field"><span>From</span><input data-field="from" value="${esc(r.from)}" /></label>
     <div class="field-pair">
@@ -965,16 +1033,27 @@ function drawMini(r) {
   }).catch(() => {});
 }
 
+// Focus goes into the sheet, and back where it was on close (except into a text box, which would raise the keyboard)
+let sheetFrom = null;
+const isOpen = () => $('sheetWrap').classList.contains('open');
+
 function openSheet() {
   $('sheet').scrollTop = 0;
+  if (!isOpen()) sheetFrom = document.activeElement;
   $('sheetWrap').classList.add('open');
+  $('sheet').focus({ preventScroll: true });
 }
 
 function closeSheet() {
+  const wasOpen = isOpen();
   $('sheetWrap').classList.remove('open');
   delete $('sheet').dataset.id;
   detailId = null;
+  shareState = null;
   document.activeElement?.blur();
+  const back = sheetFrom;
+  sheetFrom = null;
+  if (wasOpen && back?.isConnected && !back.matches('input, textarea')) back.focus({ preventScroll: true });
 }
 
 function patch(id, fields) {
@@ -996,6 +1075,7 @@ function deleteRec(id) {
 
 function openAccount() {
   detailId = null;
+  shareState = null;
   const name = user.displayName || 'Signed in';
   $('sheet').innerHTML = `
     <div class="grab"><div class="handle"></div></div>
@@ -1003,11 +1083,32 @@ function openAccount() {
       <h2>${esc(name)}</h2>
       <p>${esc(user.email || user.phoneNumber || '')}</p>
       <p class="sub">Everything is saved to this account, so it's on any phone or computer you sign in on.</p>
-      <button class="btn wide" data-invite>Invite a friend</button>
+    </div>
+    ${publicSection()}
+    <div class="account-actions">
+      <button class="btn sec wide" data-invite>Invite a friend</button>
       <button class="btn sec wide" data-signout>Sign out</button>
     </div>`;
   delete $('sheet').dataset.id;
   openSheet();
+}
+
+// Your public page: its link, which cities are on it, notes, and the name in the link
+function publicSection() {
+  const cities = Object.values(pubCfg.cities || {});
+  if (!pubCfg.name) {
+    return `<h3 class="sheet-sub">Public page</h3>
+      <p class="hint">Show friends where you went and what you loved. Pick a city in Where, tap Share, and turn on its public page.</p>`;
+  }
+  const url = pubUrl(pubCfg.name);
+  return `<h3 class="sheet-sub">Public page</h3>
+    <div class="pub-card">
+      <a class="pub-link" href="${esc(url)}">${esc(prettyUrl(url))}</a>
+      <button class="btn wide" data-pub-share="">Share my page</button>
+      <p class="hint">${cities.length ? `${esc(listJoin(cities))} ${cities.length === 1 ? 'is' : 'are'} on it.` : 'No cities on it right now.'} To add or remove one, pick it in Where and tap Share.</p>
+    </div>
+    <label class="toggle"><span>Show my notes</span><input type="checkbox" id="pubNotes" ${pubCfg.notes !== false ? 'checked' : ''} /></label>
+    <label class="field"><span>Name in the link</span><input id="pubName" value="${esc(pubCfg.name)}" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done" /></label>`;
 }
 
 // Pull the sheet down to close it: it follows the finger, and a quick flick is enough
@@ -1084,6 +1185,7 @@ const decodeRec = a => ({
   link: /^https?:\/\//i.test(a[5]) ? String(a[5]) : '',
   lat: Number(a[6]) || 0,
   lng: Number(a[7]) || 0,
+  day: Number(a[8]) || 0,
 });
 
 function oneLine(r) {
@@ -1108,20 +1210,31 @@ function listTitle(recs) {
 
 let shareState = null;
 
-function openShare(recs, title) {
+// city: the Where filter's city, which can also have a public page
+function openShare(recs, title, city = '') {
   detailId = null;
-  shareState = { recs: recs.slice(0, 100), title, notes: true, url: '' };
-  const names = shareState.recs.slice(0, 4).map(r => r.name).join(', ') + (recs.length > 4 ? ` and ${recs.length - 4} more` : '');
-  $('sheet').innerHTML = `${sheetHead(recs.length === 1 ? 'Share' : `Share ${recs.length}`)}
-    <label class="field"><span>Title</span><input id="shareTitle" value="${esc(title)}" /></label>
-    <p class="hint">${esc(names)}</p>
-    <label class="toggle"><span>Include my notes</span><input type="checkbox" id="shareNotes" checked /></label>
-    <button class="btn wide" data-share-go>Share link</button>
-    <p class="hint">Whoever opens the link sees ${recs.length === 1 ? 'this' : 'these'} and can save ${recs.length === 1 ? 'it' : 'any of them'} to their own Recs. Nothing else of yours is visible.</p>`;
-  delete $('sheet').dataset.id;
+  pubErr = '';
+  shareState = { recs: recs.slice(0, 100), title, notes: true, url: '', city };
+  drawShareSheet();
   openSheet();
   buildShareUrl();
 }
+
+function drawShareSheet() {
+  const s = shareState;
+  const n = s.recs.length;
+  const names = s.recs.slice(0, 4).map(r => r.name).join(', ') + (n > 4 ? ` and ${n - 4} more` : '');
+  $('sheet').innerHTML = `${sheetHead(s.city ? `Share ${s.city}` : n === 1 ? 'Share' : `Share ${n}`)}
+    ${s.city ? publicCard(s.city) + `<h3 class="sheet-sub">Or send ${n === 1 ? 'this one' : `these ${n}`} as a list</h3>` : ''}
+    <label class="field"><span>Title</span><input id="shareTitle" value="${esc(s.title)}" /></label>
+    <p class="hint">${esc(names)}</p>
+    <label class="toggle"><span>Include my notes</span><input type="checkbox" id="shareNotes" ${s.notes ? 'checked' : ''} /></label>
+    <button class="btn wide ${s.city ? 'sec' : ''}" data-share-go>Share list</button>
+    <p class="hint">Whoever opens the link sees ${n === 1 ? 'this' : 'these'} and can save ${n === 1 ? 'it' : 'any of them'} to their own Recs. Nothing else of yours is visible.</p>`;
+  delete $('sheet').dataset.id;
+}
+
+const redrawShare = () => { if (shareState && isOpen() && !$('sheet').dataset.id) drawShareSheet(); };
 
 // Built ahead of the tap, because iOS only lets a page open the share sheet straight from a tap
 async function buildShareUrl() {
@@ -1147,6 +1260,276 @@ function doShare() {
 
 function invite() {
   shareOut('Recs', 'This is what I use to keep track of things people recommend. Open it in Safari, sign in with Google, then tap Share and Add to Home Screen.', appUrl());
+}
+
+// ── Public pages ──
+// "What I did in Madrid": the places you tried or loved in a city you made public, live, at #/@name/madrid.
+// Only eating, drinking and seeing: never apartments, doctors or anything else that says where you live.
+// Who recommended a place stays private; a street address shows as its neighborhood.
+let pub = null;          // where public pages are read and written
+let pubCfg = {};         // { name, cities: { madrid: 'Madrid' }, notes }
+let pubErr = '';         // 'setup' when the database doesn't allow public pages yet, 'taken' when no name was free
+let pubBusy = false;
+let pubLast = '', pubTimer = 0, loaded = false;
+
+const PUB_CATS = ['Restaurants', 'Bars & Cafes', 'Places & Travel'];
+const publishable = r => PUB_CATS.includes(r.category) && r.status !== 'todo';
+const slug = s => (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+const firstName = () => (user?.displayName || '').split(' ')[0] || 'Me';
+const pubUrl = (name, trip = '') => `${appUrl()}#/@${name}${trip ? '/' + trip : ''}`;
+const prettyUrl = u => u.replace(/^https?:\/\//, '');
+const isPublic = city => !!pubCfg.cities?.[slug(city)];
+const toDay = ts => Math.floor((ts || 0) / 864e5);
+const listJoin = a => a.length < 2 ? a.join('') : a.slice(0, -1).join(', ') + ' and ' + a.at(-1);
+
+function buildPub() {
+  const notes = pubCfg.notes !== false;
+  const trips = {};
+  for (const [key, city] of Object.entries(pubCfg.cities || {})) {
+    const recs = all().filter(r => publishable(r) && cityOf(r) === city).sort(byRecent).slice(0, 300);
+    trips[key] = {
+      c: city,
+      i: recs.map(r => [r.name, r.category, hoodOf(r) || '', notes ? r.note || '' : '', r.status,
+        /^https?:\/\//i.test(r.link || '') ? r.link : '', r.lat ? r5(r.lat) : 0, r.lng ? r5(r.lng) : 0, toDay(beenTime(r))]),
+    };
+  }
+  return { uid: store.uid, by: firstName(), trips };
+}
+
+// Republish a moment after anything changes; only when the page would look different
+function syncPub() {
+  if (!pubCfg.name || !loaded || !pub) return;
+  clearTimeout(pubTimer);
+  pubTimer = setTimeout(async () => {
+    const body = buildPub();
+    const json = JSON.stringify(body);
+    if (json === pubLast) return;
+    try { await pub.set(pubCfg.name, { ...body, updatedAt: Date.now() }); pubLast = json; }
+    catch { pubErr = 'setup'; redrawShare(); }
+  }, 1000);
+}
+
+function savePublic(v) {
+  pubCfg = v;
+  store.savePublic(v);
+  syncPub();
+}
+
+// Your first name, or first name plus a number when someone else has it
+async function claimName(want) {
+  let base = slug(want).replace(/-/g, '').slice(0, 20);
+  if (base.length < 2) base = 'recs' + base;
+  for (let n = 1; n <= 30; n++) {
+    const name = n === 1 ? base : base + n;
+    try {
+      const cur = await pub.get(name);
+      if (cur && cur.uid !== store.uid) continue;
+      await pub.set(name, { uid: store.uid, by: firstName(), updatedAt: Date.now() });
+      return name;
+    } catch {
+      pubErr = 'setup';
+      return '';
+    }
+  }
+  pubErr = 'taken';
+  return '';
+}
+
+async function setCityPublic(city, on) {
+  pubErr = '';
+  const cities = { ...(pubCfg.cities || {}) };
+  if (on) cities[slug(city)] = city;
+  else delete cities[slug(city)];
+  let name = pubCfg.name;
+  if (on && !name) {
+    pubBusy = true;
+    redrawShare();
+    name = await claimName(firstName());
+    pubBusy = false;
+    if (!name) { redrawShare(); return; }
+  }
+  savePublic({ ...pubCfg, name, cities });
+  redrawShare();
+}
+
+async function renamePub(want) {
+  const old = pubCfg.name;
+  const name = slug(want).slice(0, 24);
+  if (!name || name === old) { openAccount(); return; }
+  if (name.length < 2) { toast('Use at least two letters'); openAccount(); return; }
+  try {
+    const cur = await pub.get(name);
+    if (cur && cur.uid !== store.uid) { toast(`Someone already has ${name}`); openAccount(); return; }
+    pubCfg = { ...pubCfg, name };
+    await pub.set(name, { ...buildPub(), updatedAt: Date.now() });
+  } catch {
+    pubCfg = { ...pubCfg, name: old };
+    toast('That name could not be saved');
+    openAccount();
+    return;
+  }
+  if (old) pub.remove(old).catch(() => {});
+  pubLast = '';
+  savePublic(pubCfg);
+  openAccount();
+  toast('Link changed. The old one stops working.');
+}
+
+function sharePub(trip) {
+  const city = trip ? pubCfg.cities?.[trip] : '';
+  const by = firstName();
+  shareOut(city ? `${by} in ${city}` : `${by}'s places`, city ? `Where I went in ${city}` : 'Places I went and what I thought', pubUrl(pubCfg.name, trip));
+}
+
+// The top of the share sheet when a city is picked
+function publicCard(city) {
+  const on = isPublic(city) && !!pubCfg.name;
+  const n = all().filter(r => publishable(r) && cityOf(r) === city).length;
+  const url = on ? pubUrl(pubCfg.name, slug(city)) : '';
+  const notes = pubCfg.notes !== false ? ', with your notes' : '';
+  const what = n
+    ? `Anyone with the link sees the ${n === 1 ? 'place' : `${n} places`} you tried or loved in ${esc(city)}${notes}. It updates as you go. Who recommended them stays private.`
+    : `Mark places in ${esc(city)} as Tried or Loved and they show up here.`;
+  const err = {
+    setup: 'Public pages need one change in the Firebase database rules first. The rule is in the code, above firebasePub.',
+    taken: 'Every name like yours is taken. Try again later.',
+  }[pubErr];
+  return `<div class="pub-card">
+    <label class="toggle bare"><span>Public page</span><input type="checkbox" data-pub-city="${esc(city)}" ${on ? 'checked' : ''} ${pubBusy ? 'disabled' : ''} /></label>
+    ${on ? `<a class="pub-link" href="${esc(url)}">${esc(prettyUrl(url))}</a>
+      <button class="btn wide" data-pub-share="${esc(slug(city))}">Share page</button>` : ''}
+    <p class="hint">${err ? esc(err) : what}</p>
+  </div>`;
+}
+
+// ── Opening a public page ──
+let pubPage = null;  // { name, at, data }
+
+async function renderPub() {
+  const { name, trip } = route();
+  $('login').classList.add('hidden');
+  $('app').classList.add('hidden');
+  $('sharedView').classList.remove('hidden');
+  closeSheet();
+  // Fetched once a visit, and again after half a minute so an open tab catches up
+  if (!pubPage || pubPage.name !== name || Date.now() - pubPage.at > 30000) {
+    const mine = { name, at: Date.now() };
+    const fresh = pubPage?.name !== name;
+    pubPage = mine;
+    if (fresh) { $('sharedView').innerHTML = ''; $('sharedView').dataset.key = ''; }
+    try { mine.data = await pub.get(name); } catch { mine.data = null; }
+    if (pubPage !== mine || route().view !== 'pub') return;
+  }
+  const r = route();
+  const data = pubPage.data;
+  const trips = data?.trips || {};
+  if (!data) { drawMissing('Nothing here', 'The link may be wrong, or the page was taken down.'); return; }
+  const by = String(data.by || 'A friend').slice(0, 40);
+  if (!r.trip) { drawProfile(data, name, by); return; }
+  const t = trips[r.trip];
+  if (!t) { drawMissing(`${by} hasn't made this city public`, '', `#/@${name}`, `See ${by}'s places`); return; }
+  const key = `@${name}/${r.trip}`;
+  if (shared?.key !== key || shared.at !== data.updatedAt) {
+    shared = {
+      key, at: data.updatedAt, by, title: String(t.c || '').slice(0, 80), city: String(t.c || '').slice(0, 80), name,
+      recs: (Array.isArray(t.i) ? t.i : []).map(decodeRec).filter(x => x.name),
+    };
+  }
+  drawShared();
+  flushPending();
+}
+
+function drawMissing(title, sub, href = '', label = 'Open Recs') {
+  const v = $('sharedView');
+  v.dataset.key = '';
+  document.title = 'Recs';
+  v.innerHTML = `<div class="none"><p>${esc(title)}</p>${sub ? `<p class="sub">${esc(sub)}</p>` : ''}
+    ${href ? `<a class="btn-primary as-link" href="${esc(href)}">${esc(label)}</a>` : '<button class="btn-primary" data-go-home>Open Recs</button>'}</div>`;
+}
+
+// "October 2026", "Mar – Oct 2026", "2025 – 2026"
+function fmtSpan(days) {
+  const d = days.filter(Boolean);
+  if (!d.length) return '';
+  const a = new Date(Math.min(...d) * 864e5), b = new Date(Math.max(...d) * 864e5);
+  const mon = (x, month) => x.toLocaleString('en-US', { month, timeZone: 'UTC' });
+  if (a.getUTCFullYear() !== b.getUTCFullYear()) return `${a.getUTCFullYear()} – ${b.getUTCFullYear()}`;
+  if (a.getUTCMonth() === b.getUTCMonth()) return `${mon(a, 'long')} ${a.getUTCFullYear()}`;
+  return `${mon(a, 'short')} – ${mon(b, 'short')} ${a.getUTCFullYear()}`;
+}
+
+const tripLine = recs => {
+  const loved = recs.filter(r => r.status === 'loved').length;
+  return [fmtSpan(recs.map(r => r.day)), `${recs.length} ${recs.length === 1 ? 'place' : 'places'}`, loved && `${loved} loved`].filter(Boolean).join(' · ');
+};
+
+function drawProfile(data, name, by) {
+  const v = $('sharedView');
+  const trips = Object.entries(data.trips || {})
+    .map(([k, t]) => ({ k, city: String(t.c || k), recs: (Array.isArray(t.i) ? t.i : []).map(decodeRec).filter(x => x.name) }))
+    .filter(t => t.recs.length)
+    .sort((a, b) => Math.max(0, ...b.recs.map(r => r.day)) - Math.max(0, ...a.recs.map(r => r.day)));
+  const key = `@${name}|${data.updatedAt}`;
+  document.title = `${by}'s places`;
+  if (v.dataset.key === key) return;
+  v.dataset.key = key;
+  shared = null;
+  const places = trips.flatMap(t => t.recs);
+  const rows = trips.map(t => `<a class="row city-row" href="#/@${esc(name)}/${esc(t.k)}">
+      <div class="row-body"><div class="row-name">${esc(t.city)}</div><div class="row-meta">${esc(tripLine(t.recs))}</div></div>
+      <span class="chev">${ICON.chevron}</span>
+    </a>`).join('');
+  v.innerHTML = `
+    <header class="shared-head">
+      <p class="eyebrow">Recs</p>
+      <h1>${esc(by)}'s places</h1>
+      ${trips.length ? `<p class="trip-sub">${trips.length} ${trips.length === 1 ? 'city' : 'cities'} · ${places.length} places · ${places.filter(r => r.status === 'loved').length} loved</p>` : ''}
+    </header>
+    ${places.some(r => r.lat) ? '<div class="pub-map"><div id="pubMap"></div></div>' : ''}
+    ${trips.length ? `<div class="list">${rows}</div>` : `<div class="none"><p>Nothing public yet.</p></div>`}
+    <div class="shared-foot">${footNote()}</div>`;
+  window.scrollTo(0, 0);
+  drawPubMap(trips.flatMap(t => t.recs.map(r => ({ ...r, trip: t.k }))), r => { location.hash = `/@${name}/${r.trip}`; });
+}
+
+// Bottom of a page friends open: a way home, or what Recs is
+const footNote = () => store
+  ? '<button class="link-btn" data-go-home>Open my Recs</button>'
+  : '<p class="hint">Recs keeps what people tell you to try, in one place, so you can find it later. Free, with your Google account.</p>';
+
+// One map at the top of a public page; loved pins sit on top
+let pubMap = null;
+async function drawPubMap(recs, onTap) {
+  const pts = recs.filter(r => r.lat && r.lng).sort((a, b) => RANK[a.status] - RANK[b.status]);
+  const box = $('pubMap')?.parentElement;
+  if (!box) return;
+  if (!pts.length) { box.remove(); return; }
+  let lib;
+  try { lib = await loadMap(); } catch { box.remove(); return; }
+  if (!$('pubMap') || $('pubMap').parentElement !== box) return;
+  ml = lib;
+  pubMap?.remove();
+  pubMap = new lib.Map({ container: 'pubMap', style: styleUrl(), center: [pts[0].lng, pts[0].lat], zoom: 14,
+    attributionControl: false, cooperativeGestures: true, dragRotate: false, pitchWithRotate: false });
+  pubMap.touchZoomRotate.disableRotation();
+  pubMap.addControl(new lib.AttributionControl({ compact: true }), 'bottom-right');
+  pubMap.on('load', () => box.querySelector('.maplibregl-ctrl-attrib')?.classList.remove('maplibregl-compact-show'));
+  for (const r of pts) new lib.Marker({ element: pinEl(r, () => onTap(r)) }).setLngLat([r.lng, r.lat]).addTo(pubMap);
+  if (pts.length > 1) {
+    const b = new lib.LngLatBounds();
+    pts.forEach(r => b.extend([r.lng, r.lat]));
+    pubMap.fitBounds(b, { padding: 40, maxZoom: 15, duration: 0 });
+  }
+}
+
+// Tapping a pin on a trip page brings its row into view and marks it for a moment
+function showRow(i) {
+  const el = document.querySelector(`[data-pub-row="${i}"]`);
+  if (!el) return;
+  el.scrollIntoView({ behavior: reduceMotion.matches ? 'auto' : 'smooth', block: 'center' });
+  el.classList.remove('flash');
+  void el.offsetWidth;
+  el.classList.add('flash');
 }
 
 // ── Opening a shared list ──
@@ -1179,26 +1562,46 @@ async function renderShared() {
 
 const isSaved = r => all().some(x => x.name.toLowerCase() === r.name.toLowerCase() && x.category === r.category);
 
+// A list someone sent, or a public trip page (s.city). The header and map are drawn once; the rows redraw as you save.
 function drawShared() {
   const s = shared;
   const v = $('sharedView');
   if (s.error) {
+    v.dataset.key = '';
     v.innerHTML = `<div class="none"><p>This link didn't open.</p><p class="sub">It may have been cut off when it was copied. Ask for it again.</p>
       <button class="btn-primary" data-go-home>Open Recs</button></div>`;
     return;
   }
   const by = s.by || 'A friend';
+  const trip = !!s.city;
+  document.title = trip ? `${by} in ${s.city}` : s.title;
+  if (v.dataset.key !== `${s.key}|${s.at || ''}`) {
+    const fresh = !v.dataset.key?.startsWith(s.key + '|');
+    v.dataset.key = `${s.key}|${s.at || ''}`;
+    v.innerHTML = `
+      <header class="shared-head">
+        ${trip ? `<a class="eyebrow" href="#/@${esc(s.name)}">${esc(by)}</a>` : `<p class="eyebrow">From ${esc(by)}</p>`}
+        <h1>${esc(s.title)}</h1>
+        ${trip ? `<p class="trip-sub">${esc(tripLine(s.recs))}</p>` : ''}
+      </header>
+      ${trip && s.recs.some(r => r.lat) ? '<div class="pub-map"><div id="pubMap"></div></div>' : ''}
+      <div id="sharedBody"></div>`;
+    if (fresh) window.scrollTo(0, 0);
+    if (trip) drawPubMap(s.recs.map((r, i) => ({ ...r, i })), r => showRow(r.i));
+  }
+
   const mixed = new Set(s.recs.map(r => r.category)).size > 1;
   const signedIn = !!store;
   const left = s.recs.filter(r => !isSaved(r)).length;
-  const rows = s.recs.map((r, i) => {
-    const did = { loved: `${by} loved it`, tried: `${by} tried it` }[r.status];
+  const row = (r, i) => {
+    // On a trip page the section says loved or tried; on a list it's said in words
+    const did = !trip && { loved: `${by} loved it`, tried: `${by} tried it` }[r.status];
     const meta = [mixed && r.category, hoodOf(r) || (ADDRESS.test(r.where || '') ? cityOf(r) : r.where), did].filter(Boolean).join(' · ');
     const act = action(r);
     const saved = signedIn && isSaved(r);
-    // Their tried/loved is said in words; the mark is for your own list, so it stays empty here
-    return `<div class="row">
-      ${mark({ status: 'todo' })}
+    // The mark is for your own list: empty on a list someone sent, left out on a trip page
+    return `<div class="row" data-pub-row="${i}">
+      ${trip ? '' : mark({ status: 'todo' })}
       <a class="row-body" href="${esc(act.url)}" target="_blank" rel="noopener">
         <div class="row-name">${esc(r.name)}</div>
         ${r.note ? `<div class="row-note wrap">${esc(r.note)}</div>` : ''}
@@ -1206,35 +1609,39 @@ function drawShared() {
       </a>
       ${saved ? '<span class="row-act saved">Saved</span>' : `<button class="row-act" data-save="${i}">Save</button>`}
     </div>`;
-  }).join('');
+  };
+  const indexed = s.recs.map((r, i) => [r, i]);
+  const section = (label, list) => list.length
+    ? `${label ? `<h2 class="pub-h">${label}</h2>` : ''}<div class="list${trip ? ' bare' : ''}">${list.map(([r, i]) => row(r, i)).join('')}</div>` : '';
+  const body = trip
+    ? section('Loved', indexed.filter(([r]) => r.status === 'loved')) + section('Tried', indexed.filter(([r]) => r.status !== 'loved'))
+    : section('', indexed);
   const cta = !signedIn ? 'Save to my Recs'
     : left ? `Save ${left === 1 && s.recs.length === 1 ? 'it' : left === s.recs.length ? `all ${left}` : `the other ${left}`} to my Recs`
     : '';
-  v.innerHTML = `
-    <header class="shared-head">
-      <p class="eyebrow">From ${esc(by)}</p>
-      <h1>${esc(s.title)}</h1>
-    </header>
-    <div class="list">${rows}</div>
+  $('sharedBody').innerHTML = `${body || '<div class="none"><p>Nothing here yet.</p></div>'}
     <div class="shared-foot">
-      ${cta ? `<button class="btn-primary" data-save-all>${cta}</button>` : ''}
-      ${signedIn
-        ? `<button class="link-btn" data-go-home>Open my Recs</button>`
-        : '<p class="hint">Recs keeps what people tell you to try, in one place, so you can find it later. Free, with your Google account.</p>'}
+      ${cta && s.recs.length ? `<button class="btn-primary" data-save-all>${cta}</button>` : ''}
+      ${footNote()}
     </div>`;
 }
 
 function saveShared(list) {
-  let n = 0;
+  const added = [];
   for (const r of list) {
     if (isSaved(r)) continue;
     const now = Date.now();
     const rec = { name: r.name, category: r.category, note: r.note, from: shared.by, where: r.where, link: r.link, image: '', status: 'todo', createdAt: now, updatedAt: now };
-    if (r.lat && r.lng) Object.assign(rec, { lat: r.lat, lng: r.lng, geo: 'ok' });
+    // A trip page gives the neighborhood alone; the place keeps its city too
+    if (shared.city) {
+      rec.city = shared.city;
+      if (r.where && shared.city !== 'New York') rec.where = `${r.where}, ${shared.city}`;
+    }
+    if (r.lat && r.lng) Object.assign(rec, { lat: r.lat, lng: r.lng, geo: 'ok', geoV: GEO_VERSION });
     items[store.add(rec)] = rec;
-    n++;
+    added.push(r.name);
   }
-  toast(n ? `Saved ${n === 1 ? list.find(r => r.name)?.name : n + ' recs'}` : 'Already saved');
+  toast(added.length ? `Saved ${added.length === 1 ? added[0] : added.length + ' recs'}` : 'Already saved');
   drawShared();
 }
 
@@ -1367,12 +1774,22 @@ function bindEvents() {
 
   $('sheetWrap').addEventListener('click', e => { if (e.target === $('sheetWrap')) closeSheet(); });
 
+  // Keyboard: Escape closes the sheet, Enter or Space opens a focused row
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && isOpen()) { e.preventDefault(); closeSheet(); return; }
+    const row = e.target.closest?.('[data-open]');
+    if (row && e.target === row && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openDetail(row.dataset.open); }
+  });
+
   $('sheet').addEventListener('input', e => {
     if (e.target.id === 'shareTitle' && shareState) { shareState.title = e.target.value.trim() || 'Recs'; buildShareUrl(); }
   });
 
   $('sheet').addEventListener('change', e => {
     if (e.target.id === 'shareNotes' && shareState) { shareState.notes = e.target.checked; buildShareUrl(); return; }
+    if (e.target.dataset.pubCity !== undefined) { setCityPublic(e.target.dataset.pubCity, e.target.checked); return; }
+    if (e.target.id === 'pubNotes') { savePublic({ ...pubCfg, notes: e.target.checked }); return; }
+    if (e.target.id === 'pubName') { renamePub(e.target.value); return; }
     const field = e.target.dataset.field;
     if (!field || !detailId) return;
     let value = e.target.value.trim();
@@ -1395,14 +1812,15 @@ function bindEvents() {
     const t = e.target;
     if (t.closest('a')) return;
 
-    const el = t.closest('[data-toggle-city],[data-share-list],[data-share-one],[data-share-go],[data-invite],[data-save],[data-save-all],[data-go-home],[data-cat],[data-open],[data-example],[data-status],[data-status-filter],[data-places],[data-place],[data-unpinned],[data-focus],[data-setcat],[data-delete],[data-close],[data-pick],[data-pickcat],[data-signout]');
+    const el = t.closest('[data-pub-share],[data-toggle-city],[data-share-list],[data-share-one],[data-share-go],[data-invite],[data-save],[data-save-all],[data-go-home],[data-cat],[data-open],[data-example],[data-status],[data-status-filter],[data-places],[data-place],[data-unpinned],[data-focus],[data-setcat],[data-delete],[data-close],[data-pick],[data-pickcat],[data-signout]');
     if (!el) return;
     const d = el.dataset;
 
-    if (d.toggleCity !== undefined) toggleCity(el);
+    if (d.pubShare !== undefined) sharePub(d.pubShare);
+    else if (d.toggleCity !== undefined) toggleCity(el);
     else if (d.shareList !== undefined) {
       const recs = scope().filter(r => statusMatch(r) && placeMatch(r)).sort(byRecent);
-      openShare(recs, listTitle(recs));
+      openShare(recs, listTitle(recs), place.city);
     }
     else if (d.shareOne !== undefined) { const r = { id: detailId, ...items[detailId] }; openShare([r], r.name); }
     else if (d.shareGo !== undefined) doShare();
@@ -1458,12 +1876,18 @@ function start(s, u) {
   btn.innerHTML = u.photoURL
     ? `<img src="${esc(u.photoURL)}" alt="" referrerpolicy="no-referrer" />`
     : esc((u.displayName || '?')[0].toUpperCase());
-  store.listen(data => { items = data; render(); queueGeo(); });
+  store.listen(data => { items = data; loaded = true; render(); queueGeo(); syncPub(); });
+  store.listenPublic(v => {
+    pubCfg = v || {};
+    syncPub();
+    redrawShare();
+  });
 }
 
 // Shared links open for anyone; everything else needs signing in
 function paint() {
   if (route().view === 'shared') renderShared();
+  else if (route().view === 'pub') renderPub();
   else if (store) render();
   else { $('sharedView').classList.add('hidden'); $('app').classList.add('hidden'); $('login').classList.remove('hidden'); }
 }
@@ -1473,17 +1897,19 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) $(
 bindEvents();
 
 if (DEMO) {
+  pub = demoPub();
   start(demoStore(), { displayName: 'Demo', email: 'Sample data, saved only in this browser. Sign out resets it.' });
 } else {
   const app = initializeApp(firebaseConfig);
   const auth = getAuth(app);
   setPersistence(auth, indexedDBLocalPersistence).catch(() => setPersistence(auth, browserLocalPersistence));
   const db = getDatabase(app);
+  pub = firebasePub(db);
   let started = false;
 
   signIn = () => signInWithPopup(auth, new GoogleAuthProvider()).catch(() => toast('Sign-in failed. Try again.'));
   $('loginBtn').addEventListener('click', signIn);
-  if (route().view === 'shared') renderShared();
+  if (route().view === 'shared' || route().view === 'pub') paint();
 
   onAuthStateChanged(auth, u => {
     if (u && !started) {
