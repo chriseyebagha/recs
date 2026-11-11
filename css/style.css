@@ -488,14 +488,53 @@ main {
 }
 
 .preview {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 2px 8px;
+  padding: 0 0 8px;
   font-size: 0.85rem;
   color: var(--text-2);
   min-width: 0;
 }
+
+/* The rule, shown when the box is empty */
+.pv-formula { padding: 2px 4px; line-height: 1.45; color: var(--text-2); }
+.pv-formula b { color: var(--accent); font-weight: 600; }
+.pv-more { display: block; font-size: 0.8rem; color: var(--text-3); }
+.pv-more b { color: var(--text-2); }
+
+/* What you typed, as it will be saved: one line that scrolls sideways, fading at the edge */
+.pv-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  white-space: nowrap;
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
+  padding-right: 24px;
+}
+.pv-row::-webkit-scrollbar { display: none; }
+.pv-name { font-weight: 600; color: var(--text); flex-shrink: 0; max-width: 60%; overflow: hidden; text-overflow: ellipsis; }
+.pv-part, .pv-add {
+  flex-shrink: 0;
+  height: 26px;
+  line-height: 26px;
+  padding: 0 9px;
+  border-radius: 13px;
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+.pv-part { background: var(--surface); color: var(--text); }
+.pv-part i { font-style: normal; color: var(--accent); font-weight: 600; }
+.pv-note { flex-shrink: 0; color: var(--text-2); max-width: 50%; overflow: hidden; text-overflow: ellipsis; }
+.pv-add { border: 1px dashed var(--text-3); color: var(--accent); font-weight: 600; transition: transform 160ms var(--ease-out); }
+.pv-add:active { transform: scale(0.95); }
+
+/* People and places you've used, right after "from" or "in" */
+.pv-sugg { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding-bottom: 8px; }
+.pv-sugg::-webkit-scrollbar { display: none; }
+.pv-sugg .chip { flex-shrink: 0; height: 30px; background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+
+@media (prefers-reduced-motion: reduce) { .pv-add:active { transform: none; } }
 
 .pv-cat {
   flex-shrink: 0;
@@ -1056,3 +1095,6 @@ main {
 .date-row input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.5; cursor: pointer; }
 @media (prefers-color-scheme: dark) { .date-row input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(1); } }
 @media (prefers-reduced-motion: reduce) { .date-row input[type="date"]:active { transform: none; } }
+
+/* A picture next to a show, video or album on a public page */
+.thumb { width: 44px; height: 44px; border-radius: 8px; object-fit: cover; flex-shrink: 0; align-self: flex-start; background: var(--surface-2); }

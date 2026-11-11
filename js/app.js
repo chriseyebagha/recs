@@ -19,33 +19,55 @@ const DEMO = new URLSearchParams(location.search).has('demo');
 // ── Categories ──
 // action decides the one button each row gets
 const CATEGORIES = [
+  // Places: these get a map, and go on a city's public page
   { id: 'Restaurants', action: 'map', words: ['restaurant','pasta','pizza','pizzeria','sushi','ramen','pho','noodle','noodles','taco','tacos','taqueria','brunch','dinner','lunch','breakfast','bbq','burger','burgers','steak','steakhouse','seafood','oyster','oysters','chicken','wings','halal','dim sum','dumplings','omakase','izakaya','tapas','trattoria','osteria','bistro','brasserie','diner','eatery','kitchen','grill','supper club','thai','indian','italian','mexican','korean','korean bbq','chinese','japanese','vietnamese','french','greek','mediterranean','ethiopian','nigerian','ghanaian','jamaican','caribbean','african','vegan','food','bakery','bagel','bagels','deli','sandwich','sandwiches','suya','jollof spot','dessert','ice cream','gelato','donut','donuts','patisserie','pastry'] },
   { id: 'Bars & Cafes', action: 'map', words: ['bar','cocktail','cocktails','wine bar','natural wine','pub','tavern','lounge','brewery','beer garden','coffee','cafe','café','espresso','matcha','tea','boba','juice','speakeasy','rooftop','jazz club','nightclub','club','karaoke'] },
-  { id: 'Recipes', action: 'search', words: ['recipe','recipes','stew','soup','sauce','marinade','jollof','how to cook','how to make'] },
-  { id: 'Movies & TV', action: 'watch', words: ['movie','movies','film','series','tv show','show','tv','documentary','netflix','hbo','hulu','prime video','apple tv','disney+','season','anime'] },
-  { id: 'Music', action: 'listen', words: ['album','song','songs','artist','band','playlist','ep','track','spotify','rapper','singer','dj','mixtape'] },
-  { id: 'Books', action: 'search', words: ['book','books','novel','memoir','author','audiobook','kindle'] },
+  { id: 'Hotels', action: 'map', words: ['hotel','hotels','airbnb','resort','hostel','motel','guesthouse','guest house','b&b','bnb','villa','boutique hotel'] },
+  { id: 'Shops', action: 'map', words: ['shop','store','boutique','vintage','vintage store','thrift','thrift store','bookstore','bookshop','record store','flea market','florist','concept store'] },
+  { id: 'Places & Travel', action: 'map', words: ['trip','travel','beach','park','museum','hike','island','gallery','vacation','market','theater','theatre','cinema','venue','viewpoint','garden','day trip'] },
+  // Things: these go on their own public page, like a shelf
+  { id: 'Movies', action: 'watch', words: ['movie','movies','film','films','documentary','trilogy','a24','criterion'] },
+  { id: 'TV Shows', action: 'watch', words: ['show','shows','tv show','tv series','series','tv','season','miniseries','limited series','sitcom','anime','docuseries','k-drama','kdrama','netflix','hbo','hulu','prime video','apple tv','disney+'] },
+  { id: 'Videos', action: 'video', words: ['youtube','youtube video','video','videos','ted talk','tiktok','vlog','youtuber','channel'] },
+  { id: 'Books', action: 'search', words: ['book','books','novel','memoir','author','audiobook','kindle','short story'] },
+  { id: 'Articles', action: 'search', words: ['article','articles','essay','newsletter','substack','blog','blog post','op-ed','longread','long read'] },
   { id: 'Podcasts', action: 'podcast', words: ['podcast','podcasts','episode','pod'] },
+  { id: 'Music', action: 'listen', words: ['album','song','songs','artist','band','playlist','ep','track','spotify','rapper','singer','dj','mixtape'] },
+  { id: 'Games', action: 'search', words: ['game','games','video game','board game','boardgame','ps5','xbox','nintendo','switch game','steam'] },
+  { id: 'Events', action: 'search', words: ['concert','gig','festival','exhibition','exhibit','musical','broadway','comedy show','stand-up','standup','opera','ballet','tickets'] },
+  { id: 'Recipes', action: 'search', words: ['recipe','recipes','stew','soup','sauce','marinade','jollof','how to cook','how to make'] },
+  { id: 'Apps', action: 'search', words: ['app','apps','app store','ios app','android app','chrome extension','extension','software'] },
+  { id: 'Products', action: 'search', words: ['buy','product','gadget','shoes','sneakers','jacket','headphones','skincare','cologne','perfume','moisturizer'] },
   { id: 'Courses & Certs', action: 'search', words: ['course','class','certification','cert','certificate','exam','bootcamp','workshop','training','udemy','coursera'] },
+  // Private: never on a public page
   { id: 'Services', action: 'map', words: ['barber','barbershop','haircut','salon','dentist','doctor','therapist','mechanic','tailor','plumber','trainer','physio','dermatologist','nails','spa','massage','gym','cleaner','stylist','tattoo'] },
   { id: 'Apartments', action: 'map', words: ['apartment','apartments','apt','rental','rentals','1br','2br','3br','1 bedroom','2 bedroom','3 bedroom','one bedroom','two bedroom','listing','open house','broker','no fee','lease','sublet','condo','townhouse','brownstone','studio apartment'] },
-  { id: 'Places & Travel', action: 'map', words: ['hotel','trip','travel','beach','park','museum','hike','island','airbnb','resort','gallery','vacation','market','bookstore','theater','theatre','cinema','venue'] },
-  { id: 'Products', action: 'search', words: ['buy','product','app','gadget','shoes','sneakers','jacket','headphones','skincare','cologne','perfume','moisturizer'] },
   { id: 'Other', action: 'search', words: [] },
 ];
 const CAT = Object.fromEntries(CATEGORIES.map(c => [c.id, c]));
 const isPlace = r => CAT[r.category]?.action === 'map';
+// Movies & TV became two categories; saves from before, and old shared links, are read as one of them
+const TV_WORDS = /\b(shows?|series|seasons?|episodes?|tv|hbo|sitcom|anime|miniseries|docuseries|netflix|hulu)\b/i;
+const splitMoviesTv = r => TV_WORDS.test(`${r.name} ${r.note || ''} ${r.link || ''}`) ? 'TV Shows' : 'Movies';
+const knownCat = (c, r) => c === 'Movies & TV' ? splitMoviesTv(r) : CAT[c] ? c : 'Other';
 
 const DOMAINS = [
   [/spotify\.com\/(show|episode)|podcasts\.apple|overcast\.fm|pocketcasts/i, 'Podcasts'],
-  [/netflix|hulu|hbomax|max\.com|disneyplus|primevideo|tv\.apple|imdb|letterboxd|justwatch|rottentomatoes/i, 'Movies & TV'],
-  [/spotify\.com|music\.apple|soundcloud|bandcamp|tidal\.com/i, 'Music'],
+  [/letterboxd|imdb|rottentomatoes\.com\/m\//i, 'Movies'],
+  [/rottentomatoes\.com\/tv\/|netflix|hulu|hbomax|max\.com|disneyplus|primevideo|tv\.apple|justwatch/i, 'TV Shows'],
+  [/spotify\.com|music\.apple|music\.youtube|soundcloud|bandcamp|tidal\.com/i, 'Music'],
+  [/youtube\.com|youtu\.be|vimeo\.com|tiktok\.com/i, 'Videos'],
   [/coursera|udemy|edx\.org|linkedin\.com\/learning|skillshare|masterclass|credly/i, 'Courses & Certs'],
   [/resy\.com|opentable|exploretock|yelp\.com|theinfatuation|eater\.com/i, 'Restaurants'],
   [/cooking\.nytimes|allrecipes|bonappetit|seriouseats|epicurious|food52|budgetbytes/i, 'Recipes'],
   [/goodreads|bookshop\.org/i, 'Books'],
   [/streeteasy|zillow|apartments\.com|renthop|redfin|trulia|realtor\.com|compass\.com|corcoran/i, 'Apartments'],
-  [/airbnb|booking\.com|tripadvisor/i, 'Places & Travel'],
+  [/airbnb|booking\.com|hotels\.com|expedia|vrbo|marriott|hilton|hyatt/i, 'Hotels'],
+  [/tripadvisor/i, 'Places & Travel'],
+  [/store\.steampowered|boardgamegeek|nintendo\.com|playstation\.com|xbox\.com|itch\.io/i, 'Games'],
+  [/apps\.apple\.com|play\.google\.com|chromewebstore|chrome\.google\.com\/webstore|producthunt/i, 'Apps'],
+  [/eventbrite|dice\.fm|ra\.co|ticketmaster|seatgeek|partiful|lu\.ma|songkick/i, 'Events'],
+  [/substack|medium\.com|newyorker|theatlantic|nytimes\.com|wsj\.com|ft\.com|economist\.com|bloomberg\.com|wired\.com|theverge|paulgraham\.com/i, 'Articles'],
 ];
 
 // What the map says a place is, for places whose category was a guess
@@ -54,8 +76,10 @@ const OSM_CATS = {
   deli: 'Restaurants', pastry: 'Restaurants', confectionery: 'Restaurants',
   cafe: 'Bars & Cafes', bar: 'Bars & Cafes', pub: 'Bars & Cafes', biergarten: 'Bars & Cafes', nightclub: 'Bars & Cafes', ice_cream: 'Bars & Cafes', coffee: 'Bars & Cafes', tea: 'Bars & Cafes',
   hairdresser: 'Services', beauty: 'Services', massage: 'Services', tattoo: 'Services', dentist: 'Services', doctors: 'Services', clinic: 'Services', fitness_centre: 'Services',
-  museum: 'Places & Travel', gallery: 'Places & Travel', hotel: 'Places & Travel', attraction: 'Places & Travel', viewpoint: 'Places & Travel', park: 'Places & Travel',
-  theatre: 'Places & Travel', cinema: 'Places & Travel', books: 'Places & Travel', marketplace: 'Places & Travel',
+  hotel: 'Hotels', hostel: 'Hotels', guest_house: 'Hotels', motel: 'Hotels',
+  clothes: 'Shops', boutique: 'Shops', second_hand: 'Shops', gift: 'Shops', florist: 'Shops', jewelry: 'Shops', shoes: 'Shops', books: 'Shops', department_store: 'Shops',
+  museum: 'Places & Travel', gallery: 'Places & Travel', attraction: 'Places & Travel', viewpoint: 'Places & Travel', park: 'Places & Travel',
+  theatre: 'Places & Travel', cinema: 'Places & Travel', marketplace: 'Places & Travel',
 };
 
 const reEsc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -153,7 +177,9 @@ const KEYWORDS = CATEGORIES
 
 function guessCategory(text, link) {
   if (link) for (const [re, cat] of DOMAINS) if (re.test(link)) return cat;
-  for (const k of KEYWORDS) if (k.re.test(text)) return k.cat;
+  // A kind word you add after the name beats one inside it: "Dover Street Market, shop" is a shop
+  const rest = text.split(/[,;]/).slice(1).join(',');
+  for (const t of [rest, text]) for (const k of KEYWORDS) if (k.re.test(t)) return k.cat;
   if (ADDRESS.test(text)) return 'Places & Travel';
   return 'Other';
 }
@@ -186,7 +212,7 @@ function parse(raw, override, fallbackCat, been) {
       // A named spot in a known neighborhood or city is most likely somewhere to eat; the map corrects it later
       const inPlace = text.match(/(?:^|\s)(?:in|near)\s+([^,;]{1,40}?)\s*(?=[,;]|$)/i)?.[1];
       const rest = text.split(/\s*[,;]\s*/).slice(1);
-      if (been || isPlaceName(inPlace) || rest.some(isPlaceName)) { category = 'Restaurants'; auto = true; }
+      if (been || inPlace || rest.some(isPlaceName)) { category = 'Restaurants'; auto = true; }
     }
   }
 
@@ -216,7 +242,8 @@ function parse(raw, override, fallbackCat, been) {
     // A pasted address keeps its city, state and zip: "5521 Greenville Ave, Dallas, TX 75206"
     if (ADDRESS.test(where)) while (parts.length && (STATEZIP.test(parts[0]) || STATEZIP.test(parts[1] || ''))) where += ', ' + parts.shift();
   }
-  const note = cap(parts.join(', '));
+  // "book" or "show" on its own set the category; it isn't a note
+  const note = cap(parts.filter(x => !isCategoryWord(x)).join(', '));
 
   let needsTitle = false;
   if (!name && link) {
@@ -390,8 +417,10 @@ function action(r) {
       return { label: 'Listen', url: `https://open.spotify.com/search/${name}` };
     case 'podcast':
       return { label: 'Listen', url: `https://podcasts.apple.com/us/search?term=${name}` };
+    case 'video':
+      return { label: 'Watch', url: `https://www.youtube.com/results?search_query=${name}` };
     default: {
-      const hint = { Recipes: ' recipe', Books: ' book', 'Courses & Certs': ' course' }[r.category] || '';
+      const hint = { Recipes: ' recipe', Books: ' book', 'Courses & Certs': ' course', Games: ' game', Apps: ' app', Events: ' tickets', Products: ' buy' }[r.category] || '';
       return { label: 'Search', url: `https://www.google.com/search?q=${encodeURIComponent(r.name + hint)}` };
     }
   }
@@ -519,8 +548,11 @@ function demoSeed() {
     ['Via Carota', 'Restaurants', 'Go early, no reservations', 'Tunde', 'West Village', 20],
     ['Sushi Lin', 'Restaurants', 'Omakase at the bar', '', 'Prospect Heights', 1, 'loved'],
     ['Forma Pasta Factory', 'Restaurants', '', 'Kemi', 'Fort Greene', 6, 'tried'],
-    ['Severance', 'Movies & TV', 'Apple TV', 'Ana', '', 8],
-    ['Perfect Days', 'Movies & TV', '', 'Sam', '', 60, 'tried'],
+    ['Severance', 'TV Shows', 'Apple TV', 'Ana', '', 8],
+    ['Perfect Days', 'Movies', 'Quiet and perfect. Watch it on a big screen', 'Sam', '', 60, 'loved'],
+    ['The Bear', 'TV Shows', 'Season 1, then skip to Fishes', 'Tunde', '', 45, 'loved'],
+    ['Piranesi', 'Books', 'Go in knowing nothing', 'Kemi', '', 70, 'loved'],
+    ['Outer Wilds', 'Games', 'Best game I have played', 'Sam', '', 50, 'tried'],
     ['Blonde', 'Music', 'Frank Ocean', 'Tunde', '', 12],
     ['Fade Room', 'Services', 'Ask for Marcus', 'Kemi', 'Bed-Stuy', 5],
     ['AWS Solutions Architect Professional', 'Courses & Certs', 'Take after Associate', 'Sam', '', 30],
@@ -622,14 +654,38 @@ function render() {
   else if (detailId) closeSheet();
 }
 
-// The add box hint spells out what the parser reads here: "in" sets where, "from" sets who
+// ── How adding works: one rule everywhere, shown three ways ──
+// The rule: Name, a note, in where, from who. A kind word (book, show, bar) or a link sets the category.
+//   1. The placeholder is a real example for the page you're on
+//   2. Focus an empty box and the rule itself shows above it
+//   3. As you type, a preview shows each part as it will be saved, with "+ in" and "+ from" for what's missing
+const EXAMPLE = {
+  Restaurants: 'Lilia, in Williamsburg, from Ana', 'Bars & Cafes': 'Devoción, in Williamsburg, from Tunde',
+  Hotels: 'Hotel Esencia, in Tulum, from Ana', Shops: 'Café Forgot, in the LES, from Kemi', 'Places & Travel': 'The Cloisters, in Inwood, from Sam',
+  Movies: 'Perfect Days, from Sam', 'TV Shows': 'The Bear, from Tunde', Videos: 'Paste a link, or a title, from who',
+  Books: 'Piranesi, from Kemi', Articles: 'Paste a link, from who', Podcasts: 'Hardcore History, from Sam',
+  Music: 'Blonde, Frank Ocean, from Tunde', Games: 'Outer Wilds, from Sam', Events: 'Paste a link, or a name, from who',
+  Recipes: 'Smoky jollof, from Mum', Apps: 'Paste a link, or a name, from who', Products: 'Name, from who',
+  'Courses & Certs': 'AWS SA Pro, from Sam', Services: 'Fade Room barber, in Bed-Stuy, from Kemi', Apartments: '350 Broadway, great light',
+  Other: 'Name, a note, from who',
+};
+
 function addHint(r) {
-  if (logging()) return 'Place, neighborhood or address';
-  if (r.view !== 'cat') return 'Name in neighborhood, from who';
-  if (r.cat === 'Apartments') return 'Address, what you thought';
-  if (r.cat === 'Recipes') return 'Dish or link, from who';
-  if (CAT[r.cat].action === 'map') return 'Name in neighborhood, from who';
-  return 'Title or link, from who';
+  if (logging()) return 'Sushi Lin, Prospect Heights';
+  if (r.view !== 'cat') return 'Lilia, in Williamsburg, from Ana';
+  return EXAMPLE[r.cat] || 'Name, a note, from who';
+}
+
+// The rule, in words, for the page you're on
+function formula() {
+  const r = route();
+  const kw = w => `<b>${w}</b>`;
+  if (logging()) return `${kw('Place')}, where it is. Add ${kw('yesterday')} if it was.`;
+  if (r.cat === 'Apartments') return `${kw('Address')}, what you thought`;
+  const place = r.view !== 'cat' || CAT[r.cat].action === 'map';
+  const rule = `${kw(r.view === 'cat' && !place ? 'Title' : 'Name')}, a note, ${place ? `${kw('in')} where, ` : ''}${kw('from')} who`;
+  const more = r.view === 'cat' ? 'A link works too.' : `Say ${kw('book')}, ${kw('show')} or ${kw('bar')} to set the kind, or paste a link.`;
+  return `${rule}<span class="pv-more">${more}</span>`;
 }
 
 function renderControls() {
@@ -692,7 +748,7 @@ function renderHome() {
       <h2>Nothing saved yet</h2>
       <p>When someone recommends something, type it below the way you'd text it.</p>
       <div class="examples">
-        ${['Lilia, pasta in Williamsburg, from Ana', 'Severance on Apple TV, from Tunde', 'Fade Room barber in Bed-Stuy, from Kemi']
+        ${['Lilia, pasta in Williamsburg, from Ana', 'The Bear, TV show from Tunde', 'Piranesi, book from Kemi']
           .map(t => `<button class="example" data-example="${esc(t)}">${esc(t)}</button>`).join('')}
       </div>
     </div>`;
@@ -1130,17 +1186,17 @@ function openAccount() {
 
 // Your public page: its link, which cities are on it, notes, and the name in the link
 function publicSection() {
-  const cities = Object.values(pubCfg.cities || {});
+  const cities = pubLabels();
   if (!pubCfg.name) {
     return `<h3 class="sheet-sub">Public page</h3>
-      <p class="hint">Show friends where you went and what you loved. Pick a city in Where, tap Share, and turn on its public page.</p>`;
+      <p class="hint">Show friends what you loved: the places in a city, or your books, shows and more. Open a category or pick a city in Where, tap Share, and turn on its public page.</p>`;
   }
   const url = pubUrl(pubCfg.name);
   return `<h3 class="sheet-sub">Public page</h3>
     <div class="pub-card">
       <a class="pub-link" href="${esc(url)}">${esc(prettyUrl(url))}</a>
       <button class="btn wide" data-pub-share="">Share my page</button>
-      <p class="hint">${cities.length ? `${esc(listJoin(cities))} ${cities.length === 1 ? 'is' : 'are'} on it.` : 'No cities on it right now.'} To add or remove one, pick it in Where and tap Share.</p>
+      <p class="hint">${cities.length ? `${esc(listJoin(cities))} ${cities.length === 1 ? 'is' : 'are'} on it.` : 'No cities on it right now.'} To add or remove one, open the category or pick the city in Where, then tap Share.</p>
     </div>
     <label class="toggle"><span>Show my notes</span><input type="checkbox" id="pubNotes" ${pubCfg.notes !== false ? 'checked' : ''} /></label>
     <label class="field"><span>Name in the link</span><input id="pubName" value="${esc(pubCfg.name)}" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done" /></label>`;
@@ -1213,7 +1269,7 @@ const encodeRec = (r, notes) => [r.name, r.category, r.where || '', notes ? r.no
 // Everything from a link is untrusted: known categories and statuses only, web links only
 const decodeRec = a => ({
   name: String(a[0] || '').slice(0, 200),
-  category: CAT[a[1]] ? a[1] : 'Other',
+  category: knownCat(a[1], { name: String(a[0] || ''), note: String(a[3] || '') }),
   where: String(a[2] || '').slice(0, 100),
   note: String(a[3] || '').slice(0, 500),
   status: ['todo', 'tried', 'loved'].includes(a[4]) ? a[4] : 'todo',
@@ -1221,6 +1277,7 @@ const decodeRec = a => ({
   lat: Number(a[6]) || 0,
   lng: Number(a[7]) || 0,
   day: Number(a[8]) || 0,
+  image: /^https?:\/\//i.test(a[9]) ? String(a[9]) : '',
 });
 
 function oneLine(r) {
@@ -1245,11 +1302,11 @@ function listTitle(recs) {
 
 let shareState = null;
 
-// city: the Where filter's city, which can also have a public page
-function openShare(recs, title, city = '') {
+// page: { kind: 'trip', label: 'Madrid' } or { kind: 'shelf', label: 'Books' }, which can also have a public page
+function openShare(recs, title, page = null) {
   detailId = null;
   pubErr = '';
-  shareState = { recs: recs.slice(0, 100), title, notes: true, url: '', city };
+  shareState = { recs: recs.slice(0, 100), title, notes: true, url: '', page };
   drawShareSheet();
   openSheet();
   buildShareUrl();
@@ -1259,12 +1316,12 @@ function drawShareSheet() {
   const s = shareState;
   const n = s.recs.length;
   const names = s.recs.slice(0, 4).map(r => r.name).join(', ') + (n > 4 ? ` and ${n - 4} more` : '');
-  $('sheet').innerHTML = `${sheetHead(s.city ? `Share ${s.city}` : n === 1 ? 'Share' : `Share ${n}`)}
-    ${s.city ? publicCard(s.city) + `<h3 class="sheet-sub">Or send ${n === 1 ? 'this one' : `these ${n}`} as a list</h3>` : ''}
+  $('sheet').innerHTML = `${sheetHead(s.page ? `Share ${s.page.label}` : n === 1 ? 'Share' : `Share ${n}`)}
+    ${s.page ? publicCard(s.page) + `<h3 class="sheet-sub">Or send ${n === 1 ? 'this one' : `these ${n}`} as a list</h3>` : ''}
     <label class="field"><span>Title</span><input id="shareTitle" value="${esc(s.title)}" /></label>
     <p class="hint">${esc(names)}</p>
     <label class="toggle"><span>Include my notes</span><input type="checkbox" id="shareNotes" ${s.notes ? 'checked' : ''} /></label>
-    <button class="btn wide ${s.city ? 'sec' : ''}" data-share-go>Share list</button>
+    <button class="btn wide ${s.page ? 'sec' : ''}" data-share-go>Share list</button>
     <p class="hint">Whoever opens the link sees ${n === 1 ? 'this' : 'these'} and can save ${n === 1 ? 'it' : 'any of them'} to their own Recs. Nothing else of yours is visible.</p>`;
   delete $('sheet').dataset.id;
 }
@@ -1298,37 +1355,45 @@ function invite() {
 }
 
 // ── Public pages ──
-// "What I did in Madrid": the places you tried or loved in a city you made public, live, at #/@name/madrid.
-// Only eating, drinking and seeing: never apartments, doctors or anything else that says where you live.
-// Who recommended a place stays private; a street address shows as its neighborhood.
+// Two kinds, both live, both under #/@name:
+//   a trip:  #/@chris/madrid  the places you tried or loved in a city, with a map
+//   a shelf: #/@chris/books   the books (or shows, games…) you tried or loved
+// Never apartments, services or anything else that says where you live or who your doctor is.
+// Who recommended a thing stays private; a street address shows as its neighborhood.
 let pub = null;          // where public pages are read and written
-let pubCfg = {};         // { name, cities: { madrid: 'Madrid' }, notes }
+let pubCfg = {};         // { name, cities: { madrid: 'Madrid' }, shelves: { books: 'Books' }, notes }
 let pubErr = '';         // 'setup' when the database doesn't allow public pages yet, 'taken' when no name was free
 let pubBusy = false;
 let pubLast = '', pubTimer = 0, loaded = false;
 
-const PUB_CATS = ['Restaurants', 'Bars & Cafes', 'Places & Travel'];
-const publishable = r => PUB_CATS.includes(r.category) && r.status !== 'todo';
+const TRIP_CATS = ['Restaurants', 'Bars & Cafes', 'Hotels', 'Shops', 'Places & Travel'];
+const SHELF_CATS = ['Movies', 'TV Shows', 'Videos', 'Books', 'Articles', 'Podcasts', 'Music', 'Games', 'Events', 'Recipes', 'Apps', 'Products', 'Courses & Certs'];
+const done = r => r.status !== 'todo';
+const inTrip = city => r => done(r) && TRIP_CATS.includes(r.category) && cityOf(r) === city;
+const inShelf = cat => r => done(r) && r.category === cat;
+const pageRecs = (kind, label) => all().filter(kind === 'trip' ? inTrip(label) : inShelf(label));
 const slug = s => (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 const firstName = () => (user?.displayName || '').split(' ')[0] || 'Me';
-const pubUrl = (name, trip = '') => `${appUrl()}#/@${name}${trip ? '/' + trip : ''}`;
+const pubUrl = (name, key = '') => `${appUrl()}#/@${name}${key ? '/' + key : ''}`;
 const prettyUrl = u => u.replace(/^https?:\/\//, '');
-const isPublic = city => !!pubCfg.cities?.[slug(city)];
+const cfgKey = kind => kind === 'trip' ? 'cities' : 'shelves';
+const isPublic = (kind, label) => !!pubCfg[cfgKey(kind)]?.[slug(label)];
+const pubLabels = () => [...Object.values(pubCfg.cities || {}), ...Object.values(pubCfg.shelves || {})];
 const toDay = ts => Math.floor((ts || 0) / 864e5);
 const listJoin = a => a.length < 2 ? a.join('') : a.slice(0, -1).join(', ') + ' and ' + a.at(-1);
+const webUrl = u => /^https?:\/\//i.test(u || '') ? u : '';
+
+// "6 books", "1 show"
+const NOUN = { Movies: 'movie', 'TV Shows': 'show', Videos: 'video', Books: 'book', Articles: 'article', Podcasts: 'podcast', Games: 'game', Events: 'event', Recipes: 'recipe', Apps: 'app', 'Courses & Certs': 'course' };
+const count = (n, cat) => { const w = NOUN[cat] || (cat ? 'pick' : 'place'); return `${n} ${w}${n === 1 ? '' : 's'}`; };
 
 function buildPub() {
   const notes = pubCfg.notes !== false;
-  const trips = {};
-  for (const [key, city] of Object.entries(pubCfg.cities || {})) {
-    const recs = all().filter(r => publishable(r) && cityOf(r) === city).sort(byRecent).slice(0, 300);
-    trips[key] = {
-      c: city,
-      i: recs.map(r => [r.name, r.category, hoodOf(r) || '', notes ? r.note || '' : '', r.status,
-        /^https?:\/\//i.test(r.link || '') ? r.link : '', r.lat ? r5(r.lat) : 0, r.lng ? r5(r.lng) : 0, toDay(beenTime(r))]),
-    };
-  }
-  return { uid: store.uid, by: firstName(), trips };
+  const enc = r => [r.name, r.category, isPlace(r) ? hoodOf(r) || '' : '', notes ? r.note || '' : '', r.status,
+    webUrl(r.link), r.lat ? r5(r.lat) : 0, r.lng ? r5(r.lng) : 0, toDay(beenTime(r)), webUrl(r.image)];
+  const pages = kind => Object.fromEntries(Object.entries(pubCfg[cfgKey(kind)] || {}).map(([key, label]) =>
+    [key, { c: label, i: pageRecs(kind, label).sort(byRecent).slice(0, 300).map(enc) }]));
+  return { uid: store.uid, by: firstName(), trips: pages('trip'), shelves: pages('shelf') };
 }
 
 // Republish a moment after anything changes; only when the page would look different
@@ -1370,11 +1435,12 @@ async function claimName(want) {
   return '';
 }
 
-async function setCityPublic(city, on) {
+async function setPublic(kind, label, on) {
   pubErr = '';
-  const cities = { ...(pubCfg.cities || {}) };
-  if (on) cities[slug(city)] = city;
-  else delete cities[slug(city)];
+  const k = cfgKey(kind);
+  const list = { ...(pubCfg[k] || {}) };
+  if (on) list[slug(label)] = label;
+  else delete list[slug(label)];
   let name = pubCfg.name;
   if (on && !name) {
     pubBusy = true;
@@ -1383,7 +1449,7 @@ async function setCityPublic(city, on) {
     pubBusy = false;
     if (!name) { redrawShare(); return; }
   }
-  savePublic({ ...pubCfg, name, cities });
+  savePublic({ ...pubCfg, name, [k]: list });
   redrawShare();
 }
 
@@ -1410,29 +1476,33 @@ async function renamePub(want) {
   toast('Link changed. The old one stops working.');
 }
 
-function sharePub(trip) {
-  const city = trip ? pubCfg.cities?.[trip] : '';
+function sharePub(key) {
   const by = firstName();
-  shareOut(city ? `${by} in ${city}` : `${by}'s places`, city ? `Where I went in ${city}` : 'Places I went and what I thought', pubUrl(pubCfg.name, trip));
+  const city = pubCfg.cities?.[key], cat = pubCfg.shelves?.[key];
+  const [title, text] = city ? [`${by} in ${city}`, `Where I went in ${city}`]
+    : cat ? [`${by}'s ${cat}`, `${cat} I'd recommend`]
+    : [`${by}'s recs`, 'Things I loved, and where I went'];
+  shareOut(title, text, pubUrl(pubCfg.name, key));
 }
 
-// The top of the share sheet when a city is picked
-function publicCard(city) {
-  const on = isPublic(city) && !!pubCfg.name;
-  const n = all().filter(r => publishable(r) && cityOf(r) === city).length;
-  const url = on ? pubUrl(pubCfg.name, slug(city)) : '';
+// The top of the share sheet, for a city picked in Where or a category you're in
+function publicCard({ kind, label }) {
+  const on = isPublic(kind, label) && !!pubCfg.name;
+  const n = pageRecs(kind, label).length;
+  const url = on ? pubUrl(pubCfg.name, slug(label)) : '';
   const notes = pubCfg.notes !== false ? ', with your notes' : '';
+  const thing = kind === 'trip' ? `${n === 1 ? 'place' : `${n} places`} you tried or loved in ${esc(label)}` : `${n === 1 ? NOUN[label] || 'one' : count(n, label)} you tried or loved`;
   const what = n
-    ? `Anyone with the link sees the ${n === 1 ? 'place' : `${n} places`} you tried or loved in ${esc(city)}${notes}. It updates as you go. Who recommended them stays private.`
-    : `Mark places in ${esc(city)} as Tried or Loved and they show up here.`;
+    ? `Anyone with the link sees the ${thing}${notes}. It updates as you go. Who recommended ${n === 1 ? 'it' : 'them'} stays private.`
+    : `Mark ${kind === 'trip' ? `places in ${esc(label)}` : esc(label.toLowerCase())} as Tried or Loved and they show up here.`;
   const err = {
     setup: 'Public pages need one change in the Firebase database rules first. The rule is in the code, above firebasePub.',
     taken: 'Every name like yours is taken. Try again later.',
   }[pubErr];
   return `<div class="pub-card">
-    <label class="toggle bare"><span>Public page</span><input type="checkbox" data-pub-city="${esc(city)}" ${on ? 'checked' : ''} ${pubBusy ? 'disabled' : ''} /></label>
+    <label class="toggle bare"><span>Public page</span><input type="checkbox" data-pub-kind="${kind}" data-pub-label="${esc(label)}" ${on ? 'checked' : ''} ${pubBusy ? 'disabled' : ''} /></label>
     ${on ? `<a class="pub-link" href="${esc(url)}">${esc(prettyUrl(url))}</a>
-      <button class="btn wide" data-pub-share="${esc(slug(city))}">Share page</button>` : ''}
+      <button class="btn wide" data-pub-share="${esc(slug(label))}">Share page</button>` : ''}
     <p class="hint">${err ? esc(err) : what}</p>
   </div>`;
 }
@@ -1441,7 +1511,7 @@ function publicCard(city) {
 let pubPage = null;  // { name, at, data }
 
 async function renderPub() {
-  const { name, trip } = route();
+  const { name } = route();
   $('login').classList.add('hidden');
   $('app').classList.add('hidden');
   $('sharedView').classList.remove('hidden');
@@ -1457,17 +1527,18 @@ async function renderPub() {
   }
   const r = route();
   const data = pubPage.data;
-  const trips = data?.trips || {};
   if (!data) { drawMissing('Nothing here', 'The link may be wrong, or the page was taken down.'); return; }
   const by = String(data.by || 'A friend').slice(0, 40);
   if (!r.trip) { drawProfile(data, name, by); return; }
-  const t = trips[r.trip];
-  if (!t) { drawMissing(`${by} hasn't made this city public`, '', `#/@${name}`, `See ${by}'s places`); return; }
+  const t = data.trips?.[r.trip], sh = data.shelves?.[r.trip];
+  const page = t || sh;
+  if (!page) { drawMissing(`${by} hasn't made this public`, '', `#/@${name}`, `See ${by}'s recs`); return; }
   const key = `@${name}/${r.trip}`;
   if (shared?.key !== key || shared.at !== data.updatedAt) {
+    const label = String(page.c || '').slice(0, 80);
     shared = {
-      key, at: data.updatedAt, by, title: String(t.c || '').slice(0, 80), city: String(t.c || '').slice(0, 80), name,
-      recs: (Array.isArray(t.i) ? t.i : []).map(decodeRec).filter(x => x.name),
+      key, at: data.updatedAt, by, name, title: label, page: t ? 'trip' : 'shelf', city: t ? label : '', cat: t ? '' : label,
+      recs: (Array.isArray(page.i) ? page.i : []).map(decodeRec).filter(x => x.name),
     };
   }
   drawShared();
@@ -1493,35 +1564,49 @@ function fmtSpan(days) {
   return `${mon(a, 'short')} – ${mon(b, 'short')} ${a.getUTCFullYear()}`;
 }
 
-const tripLine = recs => {
+// "October 2026 · 6 places · 4 loved", "6 books · 4 loved"
+const pageLine = (recs, cat = '') => {
   const loved = recs.filter(r => r.status === 'loved').length;
-  return [fmtSpan(recs.map(r => r.day)), `${recs.length} ${recs.length === 1 ? 'place' : 'places'}`, loved && `${loved} loved`].filter(Boolean).join(' · ');
+  return [!cat && fmtSpan(recs.map(r => r.day)), count(recs.length, cat), loved && `${loved} loved`].filter(Boolean).join(' · ');
 };
+
+const decodePages = (obj, kind) => Object.entries(obj || {})
+  .map(([k, t]) => ({ k, kind, label: String(t.c || k).slice(0, 80), recs: (Array.isArray(t.i) ? t.i : []).map(decodeRec).filter(x => x.name) }))
+  .filter(t => t.recs.length);
 
 function drawProfile(data, name, by) {
   const v = $('sharedView');
-  const trips = Object.entries(data.trips || {})
-    .map(([k, t]) => ({ k, city: String(t.c || k), recs: (Array.isArray(t.i) ? t.i : []).map(decodeRec).filter(x => x.name) }))
-    .filter(t => t.recs.length)
-    .sort((a, b) => Math.max(0, ...b.recs.map(r => r.day)) - Math.max(0, ...a.recs.map(r => r.day)));
+  const latest = t => Math.max(0, ...t.recs.map(r => r.day));
+  const trips = decodePages(data.trips, 'trip').sort((a, b) => latest(b) - latest(a));
+  const shelves = decodePages(data.shelves, 'shelf').sort((a, b) => SHELF_CATS.indexOf(a.label) - SHELF_CATS.indexOf(b.label));
   const key = `@${name}|${data.updatedAt}`;
-  document.title = `${by}'s places`;
+  document.title = `${by}'s recs`;
   if (v.dataset.key === key) return;
   v.dataset.key = key;
   shared = null;
+  const everything = [...trips, ...shelves].flatMap(t => t.recs);
   const places = trips.flatMap(t => t.recs);
-  const rows = trips.map(t => `<a class="row city-row" href="#/@${esc(name)}/${esc(t.k)}">
-      <div class="row-body"><div class="row-name">${esc(t.city)}</div><div class="row-meta">${esc(tripLine(t.recs))}</div></div>
+  const pageRow = t => `<a class="row city-row" href="#/@${esc(name)}/${esc(t.k)}">
+      <div class="row-body">
+        <div class="row-name">${esc(t.label)}</div>
+        ${t.kind === 'shelf' ? `<div class="row-note">${esc(t.recs.slice(0, 3).map(r => r.name).join(', '))}</div>` : ''}
+        <div class="row-meta">${esc(pageLine(t.recs, t.kind === 'shelf' ? t.label : ''))}</div>
+      </div>
       <span class="chev">${ICON.chevron}</span>
-    </a>`).join('');
+    </a>`;
+  const line = [trips.length && `${trips.length} ${trips.length === 1 ? 'city' : 'cities'}`,
+    shelves.length && `${shelves.length} ${shelves.length === 1 ? 'category' : 'categories'}`,
+    everything.some(r => r.status === 'loved') && `${everything.filter(r => r.status === 'loved').length} loved`].filter(Boolean).join(' · ');
   v.innerHTML = `
     <header class="shared-head">
       <p class="eyebrow">Recs</p>
-      <h1>${esc(by)}'s places</h1>
-      ${trips.length ? `<p class="trip-sub">${trips.length} ${trips.length === 1 ? 'city' : 'cities'} · ${places.length} places · ${places.filter(r => r.status === 'loved').length} loved</p>` : ''}
+      <h1>${esc(by)}'s recs</h1>
+      ${line ? `<p class="trip-sub">${line}</p>` : ''}
     </header>
     ${places.some(r => r.lat) ? '<div class="pub-map"><div id="pubMap"></div></div>' : ''}
-    ${trips.length ? `<div class="list">${rows}</div>` : `<div class="none"><p>Nothing public yet.</p></div>`}
+    ${trips.length ? `${shelves.length ? '<h2 class="pub-h">Places</h2>' : ''}<div class="list bare">${trips.map(pageRow).join('')}</div>` : ''}
+    ${shelves.length ? `${trips.length ? '<h2 class="pub-h">Things</h2>' : ''}<div class="list bare">${shelves.map(pageRow).join('')}</div>` : ''}
+    ${trips.length || shelves.length ? '' : '<div class="none"><p>Nothing public yet.</p></div>'}
     <div class="shared-foot">${footNote()}</div>`;
   window.scrollTo(0, 0);
   drawPubMap(trips.flatMap(t => t.recs.map(r => ({ ...r, trip: t.k }))), r => { location.hash = `/@${name}/${r.trip}`; });
@@ -1597,7 +1682,7 @@ async function renderShared() {
 
 const isSaved = r => all().some(x => x.name.toLowerCase() === r.name.toLowerCase() && x.category === r.category);
 
-// A list someone sent, or a public trip page (s.city). The header and map are drawn once; the rows redraw as you save.
+// A list someone sent, or a public page (s.page: trip or shelf). The header and map are drawn once; the rows redraw as you save.
 function drawShared() {
   const s = shared;
   const v = $('sharedView');
@@ -1608,16 +1693,17 @@ function drawShared() {
     return;
   }
   const by = s.by || 'A friend';
-  const trip = !!s.city;
-  document.title = trip ? `${by} in ${s.city}` : s.title;
+  const trip = s.page === 'trip';
+  const onPage = !!s.page;
+  document.title = trip ? `${by} in ${s.city}` : onPage ? `${by}'s ${s.cat}` : s.title;
   if (v.dataset.key !== `${s.key}|${s.at || ''}`) {
     const fresh = !v.dataset.key?.startsWith(s.key + '|');
     v.dataset.key = `${s.key}|${s.at || ''}`;
     v.innerHTML = `
       <header class="shared-head">
-        ${trip ? `<a class="eyebrow" href="#/@${esc(s.name)}">${esc(by)}</a>` : `<p class="eyebrow">From ${esc(by)}</p>`}
+        ${onPage ? `<a class="eyebrow" href="#/@${esc(s.name)}">${esc(by)}</a>` : `<p class="eyebrow">From ${esc(by)}</p>`}
         <h1>${esc(s.title)}</h1>
-        ${trip ? `<p class="trip-sub">${esc(tripLine(s.recs))}</p>` : ''}
+        ${onPage ? `<p class="trip-sub">${esc(pageLine(s.recs, s.cat))}</p>` : ''}
       </header>
       ${trip && s.recs.some(r => r.lat) ? '<div class="pub-map"><div id="pubMap"></div></div>' : ''}
       <div id="sharedBody"></div>`;
@@ -1630,13 +1716,13 @@ function drawShared() {
   const left = s.recs.filter(r => !isSaved(r)).length;
   const row = (r, i) => {
     // On a trip page the section says loved or tried; on a list it's said in words
-    const did = !trip && { loved: `${by} loved it`, tried: `${by} tried it` }[r.status];
+    const did = !onPage && { loved: `${by} loved it`, tried: `${by} tried it` }[r.status];
     const meta = [mixed && r.category, hoodOf(r) || (ADDRESS.test(r.where || '') ? cityOf(r) : r.where), did].filter(Boolean).join(' · ');
     const act = action(r);
     const saved = signedIn && isSaved(r);
     // The mark is for your own list: empty on a list someone sent, left out on a trip page
     return `<div class="row" data-pub-row="${i}">
-      ${trip ? '' : mark({ status: 'todo' })}
+      ${onPage ? (r.image ? `<img class="thumb" src="${esc(r.image)}" alt="" loading="lazy" />` : '') : mark({ status: 'todo' })}
       <a class="row-body" href="${esc(act.url)}" target="_blank" rel="noopener">
         <div class="row-name">${esc(r.name)}</div>
         ${r.note ? `<div class="row-note wrap">${esc(r.note)}</div>` : ''}
@@ -1647,8 +1733,8 @@ function drawShared() {
   };
   const indexed = s.recs.map((r, i) => [r, i]);
   const section = (label, list) => list.length
-    ? `${label ? `<h2 class="pub-h">${label}</h2>` : ''}<div class="list${trip ? ' bare' : ''}">${list.map(([r, i]) => row(r, i)).join('')}</div>` : '';
-  const body = trip
+    ? `${label ? `<h2 class="pub-h">${label}</h2>` : ''}<div class="list${onPage ? ' bare' : ''}">${list.map(([r, i]) => row(r, i)).join('')}</div>` : '';
+  const body = onPage
     ? section('Loved', indexed.filter(([r]) => r.status === 'loved')) + section('Tried', indexed.filter(([r]) => r.status !== 'loved'))
     : section('', indexed);
   const cta = !signedIn ? 'Save to my Recs'
@@ -1668,7 +1754,7 @@ function saveShared(list) {
     const now = Date.now();
     const rec = { name: r.name, category: r.category, note: r.note, from: shared.by, where: r.where, link: r.link, image: '', status: 'todo', createdAt: now, updatedAt: now };
     // A trip page gives the neighborhood alone; the place keeps its city too
-    if (shared.city) {
+    if (shared.page === 'trip') {
       rec.city = shared.city;
       if (r.where && shared.city !== 'New York') rec.where = `${r.where}, ${shared.city}`;
     }
@@ -1698,24 +1784,88 @@ function wantSave(idx) {
 
 // ── Adding ──
 function updatePreview() {
-  const text = $('addInput').value.trim();
+  const input = $('addInput');
+  const raw = input.value;
+  const text = raw.trim();
+  const box = $('preview');
   if (!text) {
     override = null;
-    $('preview').classList.add('hidden');
     $('picker').classList.add('hidden');
+    const show = document.activeElement === input;
+    box.innerHTML = show ? `<p class="pv-formula">${formula()}</p>` : '';
+    box.classList.toggle('hidden', !show);
     return;
   }
   const p = parse(text, override, route().cat, logging());
-  const when = logging() ? (p.beenAt ? 'went yesterday' : 'went today') : '';
-  const meta = [p.from && 'from ' + p.from, p.where, when].filter(Boolean).join(' · ');
-  $('preview').innerHTML = `
-    <button class="pv-cat" data-pick>${esc(p.category)}
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>
-    </button>
-    ${logging() ? `<span class="pv-status">${status === 'loved' ? 'Loved' : 'Tried'}</span>` : ''}
-    <span class="pv-meta">${esc(meta)}</span>`;
-  $('preview').classList.remove('hidden');
+  const place = CAT[p.category].action === 'map' || p.category === 'Other';
+  const part = (w, v) => `<span class="pv-part"><i>${w}</i> ${esc(v)}</span>`;
+  const add = w => `<button class="pv-add" data-insert="${w}">+ ${w}</button>`;
+  const when = logging() ? `<span class="pv-status">${status === 'loved' ? 'Loved' : 'Tried'}${p.beenAt ? ' yesterday' : ''}</span>` : '';
+  const sugg = suggestions(raw);
+  box.innerHTML = `
+    ${sugg ? `<div class="pv-sugg">${sugg}</div>` : ''}
+    <div class="pv-row">
+      <button class="pv-cat" data-pick>${esc(p.category)}
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      ${when}
+      ${p.name ? `<span class="pv-name">${esc(p.name)}</span>` : ''}
+      ${p.where ? part('in', p.where) : ''}
+      ${p.from ? part('from', p.from) : ''}
+      ${p.note ? `<span class="pv-note">${esc(p.note)}</span>` : ''}
+      ${p.link ? '<span class="pv-part"><i>link</i></span>' : ''}
+      ${!p.where && place && !logging() ? add('in') : ''}
+      ${!p.from ? add('from') : ''}
+    </div>`;
+  box.classList.remove('hidden');
+  // Typing at the end: keep the newest part in view
+  const row = box.querySelector('.pv-row');
+  if (input.selectionStart === raw.length) row.scrollLeft = row.scrollWidth;
   if (!$('picker').classList.contains('hidden')) renderPicker(p.category);
+}
+
+// Right after "from" or "in", the people and places you've used before, so names stay spelled one way
+function suggestions(raw) {
+  const m = raw.match(/(?:^|[\s,])(from|in|near)\s+([^,;.]*)$/i);
+  if (!m) return '';
+  const who = m[1].toLowerCase() === 'from';
+  const typed = m[2].trim().toLowerCase();
+  const seen = new Map();
+  for (const r of all()) {
+    for (const v of who ? [r.from] : [hoodOf(r), cityOf(r)]) {
+      if (!v) continue;
+      const k = v.toLowerCase();
+      const e = seen.get(k) || { v, n: 0 };
+      e.n++;
+      seen.set(k, e);
+    }
+  }
+  const hits = [...seen.values()]
+    .filter(e => e.v.toLowerCase().startsWith(typed) && e.v.toLowerCase() !== typed)
+    .sort((a, b) => b.n - a.n || a.v.localeCompare(b.v))
+    .slice(0, 6);
+  return hits.map(e => `<button class="chip" data-complete="${esc(e.v)}">${esc(e.v)}</button>`).join('');
+}
+
+// "+ from" adds the word for you; a suggestion finishes the name you started
+function insertWord(w) {
+  const input = $('addInput');
+  input.value = `${input.value.replace(/[\s,]+$/, '')}, ${w} `;
+  caretEnd(input);
+}
+
+function complete(v) {
+  const input = $('addInput');
+  input.value = input.value.replace(/((?:^|[\s,])(?:from|in|near)\s+)[^,;.]*$/i, (_, a) => a + v);
+  caretEnd(input);
+}
+
+function caretEnd(input) {
+  input.focus();
+  const n = input.value.length;
+  input.setSelectionRange(n, n);
+  input.scrollLeft = input.scrollWidth;
+  updatePreview();
 }
 
 function renderPicker(selected) {
@@ -1776,6 +1926,8 @@ function save() {
 function bindEvents() {
   $('addBtn').addEventListener('click', save);
   $('addInput').addEventListener('input', updatePreview);
+  $('addInput').addEventListener('focus', updatePreview);
+  $('addInput').addEventListener('blur', () => { if (!$('addInput').value.trim()) updatePreview(); });
   $('addInput').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); save(); } });
 
   // Keep the keyboard up while picking a category
@@ -1822,7 +1974,7 @@ function bindEvents() {
 
   $('sheet').addEventListener('change', e => {
     if (e.target.id === 'shareNotes' && shareState) { shareState.notes = e.target.checked; buildShareUrl(); return; }
-    if (e.target.dataset.pubCity !== undefined) { setCityPublic(e.target.dataset.pubCity, e.target.checked); return; }
+    if (e.target.dataset.pubKind) { setPublic(e.target.dataset.pubKind, e.target.dataset.pubLabel, e.target.checked); return; }
     if (e.target.id === 'dDay' && detailId) { setBeenDay(detailId, e.target); return; }
     if (e.target.id === 'pubNotes') { savePublic({ ...pubCfg, notes: e.target.checked }); return; }
     if (e.target.id === 'pubName') { renamePub(e.target.value); return; }
@@ -1848,15 +2000,20 @@ function bindEvents() {
     const t = e.target;
     if (t.closest('a')) return;
 
-    const el = t.closest('[data-pub-share],[data-toggle-city],[data-share-list],[data-share-one],[data-share-go],[data-invite],[data-save],[data-save-all],[data-go-home],[data-cat],[data-open],[data-example],[data-status],[data-status-filter],[data-places],[data-place],[data-unpinned],[data-focus],[data-setcat],[data-delete],[data-close],[data-pick],[data-pickcat],[data-signout]');
+    const el = t.closest('[data-insert],[data-complete],[data-pub-share],[data-toggle-city],[data-share-list],[data-share-one],[data-share-go],[data-invite],[data-save],[data-save-all],[data-go-home],[data-cat],[data-open],[data-example],[data-status],[data-status-filter],[data-places],[data-place],[data-unpinned],[data-focus],[data-setcat],[data-delete],[data-close],[data-pick],[data-pickcat],[data-signout]');
     if (!el) return;
     const d = el.dataset;
 
-    if (d.pubShare !== undefined) sharePub(d.pubShare);
+    if (d.insert !== undefined) insertWord(d.insert);
+    else if (d.complete !== undefined) complete(d.complete);
+    else if (d.pubShare !== undefined) sharePub(d.pubShare);
     else if (d.toggleCity !== undefined) toggleCity(el);
     else if (d.shareList !== undefined) {
       const recs = scope().filter(r => statusMatch(r) && placeMatch(r)).sort(byRecent);
-      openShare(recs, listTitle(recs), place.city);
+      const r = route();
+      const page = r.view === 'cat' && SHELF_CATS.includes(r.cat) ? { kind: 'shelf', label: r.cat }
+        : place.city ? { kind: 'trip', label: place.city } : null;
+      openShare(recs, listTitle(recs), page);
     }
     else if (d.shareOne !== undefined) { const r = { id: detailId, ...items[detailId] }; openShare([r], r.name); }
     else if (d.shareGo !== undefined) doShare();
@@ -1900,6 +2057,16 @@ function bindEvents() {
   bindSheetDrag();
 }
 
+// Saves from before a category split are moved once, in place
+function migrate() {
+  for (const [id, r] of Object.entries(items)) {
+    if (r.category !== 'Movies & TV') continue;
+    const category = splitMoviesTv(r);
+    items[id] = { ...r, category };
+    store.update(id, { category });
+  }
+}
+
 // ── Start ──
 function start(s, u) {
   store = s;
@@ -1912,7 +2079,7 @@ function start(s, u) {
   btn.innerHTML = u.photoURL
     ? `<img src="${esc(u.photoURL)}" alt="" referrerpolicy="no-referrer" />`
     : esc((u.displayName || '?')[0].toUpperCase());
-  store.listen(data => { items = data; loaded = true; render(); queueGeo(); syncPub(); });
+  store.listen(data => { items = data; migrate(); loaded = true; render(); queueGeo(); syncPub(); });
   store.listenPublic(v => {
     pubCfg = v || {};
     syncPub();
