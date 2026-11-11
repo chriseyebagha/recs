@@ -412,14 +412,21 @@ function ago(ts) {
   return y === 1 ? '1 year ago' : `${y} years ago`;
 }
 
-function toast(msg, undo) {
+// act: a button on the toast, Undo unless named otherwise
+function toast(msg, act, label = 'Undo') {
   const el = $('toast');
-  el.innerHTML = `<span>${esc(msg)}</span>${undo ? '<button>Undo</button>' : ''}`;
-  if (undo) el.querySelector('button').onclick = () => { el.classList.remove('show'); undo(); };
+  el.innerHTML = `<span>${esc(msg)}</span>${act ? `<button>${esc(label)}</button>` : ''}`;
+  if (act) el.querySelector('button').onclick = () => { el.classList.remove('show'); act(); };
   el.classList.add('show');
   clearTimeout(el._t);
-  el._t = setTimeout(() => el.classList.remove('show'), undo ? 4000 : 2000);
+  el._t = setTimeout(() => el.classList.remove('show'), act ? (label === 'Undo' ? 4000 : 6000) : 2000);
 }
+
+// Dates as the date picker reads and writes them, in your own time zone
+const pad = n => String(n).padStart(2, '0');
+const isoDay = ts => { const d = new Date(ts); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
+const fromIsoDay = v => { const [y, m, d] = v.split('-').map(Number); return new Date(y, m - 1, d, 12).getTime(); };
+const longDay = ts => new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
 const pref = {
   get(k, d) { try { return localStorage.getItem('recs-' + k) ?? d; } catch { return d; } },
@@ -945,7 +952,7 @@ function detailParts(r) {
   const tell = r.from && r.status !== 'todo'
     ? `<a class="btn sec" href="sms:&body=${encodeURIComponent(thanks)}">Tell ${esc(r.from.split(' ')[0])}</a>`
     : '';
-  const when = r.status !== 'todo' && r.beenAt ? `${isPlace(r) ? 'Went' : 'Tried'} ${ago(r.beenAt)}` : `Added ${ago(r.createdAt)}`;
+  const when = `Added ${ago(r.createdAt)}`;
   let where = '';
   if (isPlace(r)) {
     if (r.lat) {
@@ -976,6 +983,10 @@ function renderDetail() {
     $('dCat').textContent = r.category;
     $('dActions').innerHTML = parts.actions;
     $('dWhen').textContent = parts.when;
+    const day = $('dDay');
+    day.closest('.date-row').classList.toggle('hidden', r.status === 'todo');
+    day.previousElementSibling.textContent = isPlace(r) ? 'Went' : 'Tried';
+    if (day !== document.activeElement && day.value !== isoDay(beenTime(r))) day.value = isoDay(beenTime(r));
     sheet.querySelectorAll('[data-setcat]').forEach(b => b.classList.toggle('on', b.dataset.setcat === r.category));
     sheet.querySelectorAll('[data-field]').forEach(el => {
       const v = r[el.dataset.field] || '';
@@ -1002,6 +1013,8 @@ function renderDetail() {
       ${[['todo', 'Want to try'], ['tried', 'Tried'], ['loved', 'Loved']].map(([s, l]) =>
         `<button class="${r.status === s ? 'on' : ''}" data-status="${s}">${l}</button>`).join('')}
     </div>
+    <label class="toggle date-row ${r.status === 'todo' ? 'hidden' : ''}"><span>${isPlace(r) ? 'Went' : 'Tried'}</span>
+      <input type="date" id="dDay" value="${isoDay(beenTime(r))}" max="${isoDay(Date.now())}" /></label>
     <div class="actions" id="dActions">${parts.actions}</div>
     <div id="dWhere" data-key="${whereKey}">${parts.where}</div>
     <label class="field"><span>Note</span><textarea data-field="note" rows="2">${esc(r.note)}</textarea></label>
@@ -1062,6 +1075,28 @@ function patch(id, fields) {
   for (const k in p) if (p[k] === null) delete items[id][k];
   store.update(id, p);
   render();
+}
+
+// Backdating: change when you went. Places from the same trip logged the same day can follow in one tap.
+function setBeenDay(id, input) {
+  const r = { id, ...items[id] };
+  if (!input.value) { input.value = isoDay(beenTime(r)); return; }
+  const ts = Math.min(fromIsoDay(input.value), Date.now());
+  const was = isoDay(beenTime(r));
+  if (isoDay(ts) === was) return;
+  patch(id, { beenAt: ts });
+  const city = cityOf(r);
+  const same = city ? all().filter(x => x.id !== id && x.status !== 'todo' && cityOf(x) === city && isoDay(beenTime(x)) === was) : [];
+  if (!same.length) return;
+  toast(`Move ${same.length} other ${city} ${same.length === 1 ? 'place' : 'places'} too?`, () => {
+    const now = Date.now();
+    for (const x of same) {
+      items[x.id] = { ...items[x.id], beenAt: ts, updatedAt: now };
+      store.update(x.id, { beenAt: ts, updatedAt: now });
+    }
+    render();
+    toast(`Moved ${same.length + 1} places to ${longDay(ts)}`);
+  }, 'Move');
 }
 
 function deleteRec(id) {
@@ -1788,6 +1823,7 @@ function bindEvents() {
   $('sheet').addEventListener('change', e => {
     if (e.target.id === 'shareNotes' && shareState) { shareState.notes = e.target.checked; buildShareUrl(); return; }
     if (e.target.dataset.pubCity !== undefined) { setCityPublic(e.target.dataset.pubCity, e.target.checked); return; }
+    if (e.target.id === 'dDay' && detailId) { setBeenDay(detailId, e.target); return; }
     if (e.target.id === 'pubNotes') { savePublic({ ...pubCfg, notes: e.target.checked }); return; }
     if (e.target.id === 'pubName') { renamePub(e.target.value); return; }
     const field = e.target.dataset.field;
