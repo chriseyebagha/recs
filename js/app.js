@@ -1,5 +1,5 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-import { getDatabase, ref, onValue, get, push, set, update as dbUpdate, remove as dbRemove } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+import { getDatabase, ref, onValue, get, push, set, update as dbUpdate, remove as dbRemove, increment, query as dbQuery, orderByKey, startAt } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 import { getAuth, setPersistence, indexedDBLocalPersistence, browserLocalPersistence, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 
 // Same Firebase project as the shopping list; data lives under users/{uid}/recs
@@ -202,6 +202,14 @@ function parse(raw, override, fallbackCat, been) {
     link = url[0].replace(/[).]+$/, '');
     text = text.replace(url[0], ' ');
   }
+  // "for Daksh": only a friend's name counts, so "good for dates" stays a note
+  let to = null;
+  text = text.replace(/(?:^|[\s,;])for\s+@?([\p{L}\w-]+)(?=[\s,;.]|$)/giu, (m, w) => {
+    const f = !to && findFriend(w);
+    if (!f) return m;
+    to = f;
+    return ' ';
+  });
   text = text.replace(/\s+/g, ' ').trim();
 
   let category = override || guessCategory(text, link);
@@ -250,7 +258,7 @@ function parse(raw, override, fallbackCat, been) {
     try { name = new URL(link).hostname.replace(/^www\./, ''); } catch { name = link; }
     needsTitle = true;
   }
-  return { name, note, from, where, link, category, auto, needsTitle, beenAt };
+  return { name, note, from, where, link, category, auto, needsTitle, beenAt, to };
 }
 
 // Title and picture for links from Spotify, YouTube, Vimeo and similar
@@ -477,6 +485,10 @@ const ICON = {
   list: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="9" y1="6" x2="20" y2="6"/><line x1="9" y1="12" x2="20" y2="12"/><line x1="9" y1="18" x2="20" y2="18"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/></svg>',
   heart: '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M12 21s-7.5-4.6-9.6-9.3C.9 8.2 3 4.5 6.6 4.5c2.1 0 3.6 1.2 5.4 3.2 1.8-2 3.3-3.2 5.4-3.2 3.6 0 5.7 3.7 4.2 7.2C19.5 16.4 12 21 12 21z"/></svg>',
   check: '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="5 12.5 10 17.5 19 7"/></svg>',
+  x: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>',
+  send: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>',
+  plus: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>',
+  trash: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 7 20 7"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/></svg>',
   chevron: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg>',
 };
 
@@ -494,15 +506,52 @@ function firebaseStore(db, uid) {
     // Which cities you made public, and the name in your link
     listenPublic(cb) { onValue(ref(db, conf), snap => cb(snap.val() || {})); },
     savePublic(v) { return set(ref(db, conf), v); },
+    // Friends you can send recs to, and what they sent you
+    listenFriends(cb) { onValue(ref(db, `users/${uid}/friends`), snap => cb(snap.val() || {})); },
+    setFriend(name, f) { const r = ref(db, `users/${uid}/friends/${name}`); return f ? set(r, f) : dbRemove(r); },
+    listenInbox(cb) { onValue(ref(db, `inbox/${uid}`), snap => cb(snap.val() || {}), () => cb({})); },
+    dropInbox(id) { dbRemove(ref(db, `inbox/${uid}/${id}`)); },
+    send(toUid, item) { return set(push(ref(db, `inbox/${toUid}`)), item); },
+    // Ideas everyone can see and vote on
+    listenIdeas(cb) { onValue(ref(db, 'ideas'), snap => cb(snap.val() || {}), () => cb({})); },
+    addIdea(v) { return set(push(ref(db, 'ideas')), v); },
+    vote(id, on) { const r = ref(db, `ideas/${id}/votes/${uid}`); return on ? set(r, true) : dbRemove(r); },
+    ideaStatus(id, st) { return set(ref(db, `ideas/${id}/status`), st); },
+    isAdmin() { return get(ref(db, `admins/${uid}`)).then(snap => snap.val() === true, () => false); },
+  };
+}
+
+// Usage counts: per day, how many times each thing happened, and which accounts were active.
+// Never what anyone saved: no names, notes or places. Everyone can add to the counts; only admins read them.
+function firebaseStats(db) {
+  return {
+    bump(day, keys, uid) {
+      const up = {};
+      for (const k of keys) up[`stats/${day}/n/${k}`] = increment(1);
+      if (uid) up[`stats/${day}/u/${uid}`] = true;
+      return dbUpdate(ref(db), up).catch(() => {});
+    },
+    read: from => get(dbQuery(ref(db, 'stats'), orderByKey(), startAt(from))).then(snap => snap.val() || {}),
+  };
+}
+
+function demoStats() {
+  const read = () => { try { return JSON.parse(localStorage.getItem('recs-demo-stats')) || {}; } catch { return {}; } };
+  return {
+    bump(day, keys, uid) {
+      const d = read();
+      d[day] ??= { n: {}, u: {} };
+      for (const k of keys) d[day].n[k] = (d[day].n[k] || 0) + 1;
+      if (uid) d[day].u[uid] = true;
+      try { localStorage.setItem('recs-demo-stats', JSON.stringify(d)); } catch {}
+      return Promise.resolve();
+    },
+    read: async from => Object.fromEntries(Object.entries(read()).filter(([k]) => k >= from)),
   };
 }
 
 // Public pages: one record per person at pub/{name}, readable by anyone, written only by its owner.
-// Needs these database rules next to the existing ones:
-//   "pub": { "$name": {
-//     ".read": true,
-//     ".write": "auth != null && (data.exists() ? data.child('uid').val() === auth.uid : newData.child('uid').val() === auth.uid)",
-//     ".validate": "$name.matches(/^[a-z0-9][a-z0-9-]+$/) && $name.length <= 24 && newData.child('uid').val() === auth.uid" } }
+// The database rules for this and everything else live in database.rules.json.
 function firebasePub(db) {
   return {
     get: name => get(ref(db, `pub/${name}`)).then(s => s.val()),
@@ -534,8 +583,36 @@ function demoStore() {
   let conf = {};
   try { conf = JSON.parse(localStorage.getItem('recs-demo-public')) || {}; } catch {}
   let confCb = () => {};
+  // Friends, things they sent, and ideas: sample data, kept in this browser
+  const kept = (key, seed) => {
+    let v = null;
+    try { v = JSON.parse(localStorage.getItem(key)); } catch {}
+    let cb = () => {};
+    v ??= seed;
+    const put = next => { v = next; try { localStorage.setItem(key, JSON.stringify(v)); } catch {} cb({ ...v }); };
+    return { listen(f) { cb = f; f({ ...v }); }, get: () => v, put };
+  };
+  const day = 864e5, now = Date.now();
+  const friends = kept('recs-demo-friends', { ana: { by: 'Ana', uid: 'd-ana' }, tunde: { by: 'Tunde', uid: 'd-tunde' }, daksh: { by: 'Daksh', uid: 'd-daksh' } });
+  const inbox = kept('recs-demo-inbox', {
+    i1: { name: 'Dishoom', category: 'Restaurants', note: 'Get the black daal. Worth the line', where: 'Covent Garden, London', st: 'loved', from: 'Daksh', fromName: 'daksh', fromUid: 'd-daksh', at: now - 2 * 3600e3 },
+  });
+  const ideas = kept('recs-demo-ideas', {
+    a1: { uid: 'd-ana', by: 'Ana', text: 'Sort what I want to try by distance when I travel', at: now - 3 * day, votes: { 'd-tunde': true, 'd-daksh': true } },
+    a2: { uid: 'd-tunde', by: 'Tunde', text: 'Bring in my saved places from Google Maps', at: now - 6 * day, votes: { 'd-ana': true }, status: 'planned' },
+  });
   return {
     uid: 'demo',
+    listenFriends: friends.listen,
+    setFriend(name, f) { const v = { ...friends.get() }; if (f) v[name] = f; else delete v[name]; friends.put(v); return Promise.resolve(); },
+    listenInbox: inbox.listen,
+    dropInbox(id) { const v = { ...inbox.get() }; delete v[id]; inbox.put(v); },
+    send: () => Promise.resolve(),
+    listenIdeas: ideas.listen,
+    addIdea(x) { ideas.put({ ...ideas.get(), ['i' + Date.now().toString(36)]: x }); return Promise.resolve(); },
+    vote(id, on) { const v = structuredClone(ideas.get()); v[id].votes ??= {}; if (on) v[id].votes.demo = true; else delete v[id].votes.demo; ideas.put(v); return Promise.resolve(); },
+    ideaStatus(id, st) { const v = structuredClone(ideas.get()); v[id].status = st; ideas.put(v); return Promise.resolve(); },
+    isAdmin: () => Promise.resolve(true),
     listen(f) { cb = f; f({ ...data }); },
     listenPublic(f) { confCb = f; f(conf); },
     savePublic(v) { conf = v; try { localStorage.setItem('recs-demo-public', JSON.stringify(v)); } catch {} confCb(conf); return Promise.resolve(); },
@@ -619,6 +696,7 @@ function route() {
     return { view: 'pub', name: name.toLowerCase(), trip: trip.toLowerCase() };
   }
   if (h === 'map') return { view: 'map' };
+  if (h === 'usage') return { view: 'usage' };
   if (CAT[h]) return { view: 'cat', cat: h };
   return { view: 'home' };
 }
@@ -637,6 +715,7 @@ function render() {
   const r = route();
   if (r.view === 'shared') { renderShared(); return; }
   if (r.view === 'pub') { renderPub(); return; }
+  if (r.view === 'usage') { renderUsage(); return; }
   document.title = 'Recs';
   $('sharedView').classList.add('hidden');
   $('login').classList.add('hidden');
@@ -695,7 +774,9 @@ function formula() {
   const place = r.view !== 'cat' || CAT[r.cat].action === 'map';
   const rule = `${kw(r.view === 'cat' && !place ? 'Title' : 'Name')}, a note, ${place ? `${kw('in')} where, ` : ''}${kw('from')} who`;
   const more = r.view === 'cat' ? 'A link works too.' : `Say ${kw('book')}, ${kw('show')} or ${kw('bar')} to set the kind, or paste a link.`;
-  return `${rule}<span class="pv-more">${more}</span>`;
+  const f = friendList()[0];
+  const send = f ? `<span class="pv-more">Add ${kw('for ' + esc(f.by))} to send it to a friend instead.</span>` : '';
+  return `${rule}<span class="pv-more">${more}</span>${send}`;
 }
 
 function renderControls() {
@@ -733,7 +814,9 @@ function row(r, opts = {}) {
   // A street address is too long for a row; its city says enough
   const meta = [opts.showCat && r.category, hoodOf(r) || (ADDRESS.test(r.where || '') ? cityOf(r) : r.where), r.from && 'from ' + r.from, when].filter(Boolean).join(' · ');
   const act = action(r);
-  return `<div class="row" data-open="${r.id}" tabindex="0">
+  // Behind each row: what a swipe right or left will do
+  return `<div class="sw"><div class="sw-bg" aria-hidden="true"><span class="sw-l">${r.status === 'todo' ? ICON.check : ICON.heart} ${NEXT_LABEL[r.status]}</span><span class="sw-r">Delete ${ICON.trash}</span></div>
+  <div class="row" data-open="${r.id}" tabindex="0">
     ${mark(r)}
     <div class="row-body">
       <div class="row-name">${esc(r.name)}</div>
@@ -741,7 +824,85 @@ function row(r, opts = {}) {
       <div class="row-meta">${esc(meta)}</div>
     </div>
     <a class="row-act" href="${esc(act.url)}" target="_blank" rel="noopener">${act.label}</a>
-  </div>`;
+  </div></div>`;
+}
+
+// ── Swipe a row: left deletes, right moves it on (Want to try → Tried → Loved) ──
+// The row follows the finger, slows past the point where letting go acts, and a quick flick is enough.
+// Both can be undone from the toast.
+const NEXT = { todo: 'tried', tried: 'loved', loved: 'tried' };
+const NEXT_LABEL = { todo: 'Tried', tried: 'Loved', loved: 'Unlove' };
+let swiped = false;
+
+function bindSwipe() {
+  const main = $('main');
+  let s = null;
+  const reset = cur => {
+    cur.row.style.transform = '';
+    cur.wrap.classList.remove('dragging', 'armed');
+  };
+  main.addEventListener('pointerdown', e => {
+    if (s || e.button !== 0) return;  // one finger at a time
+    const row = e.target.closest('.sw > .row');
+    if (!row || e.target.closest('.row-act')) return;
+    s = { row, wrap: row.parentElement, id: e.pointerId, x0: e.clientX, y0: e.clientY, t0: e.timeStamp, dx: 0, axis: '' };
+  });
+  main.addEventListener('pointermove', e => {
+    if (!s || e.pointerId !== s.id) return;
+    const dx = e.clientX - s.x0, dy = e.clientY - s.y0;
+    if (!s.axis) {
+      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+      s.axis = Math.abs(dx) > Math.abs(dy) * 1.2 ? 'x' : 'y';
+      if (s.axis === 'y') { s = null; return; }  // the page scrolls instead
+      try { s.row.setPointerCapture(e.pointerId); } catch {}
+      s.wrap.classList.add('dragging');
+      s.w = s.wrap.offsetWidth;
+    }
+    s.dx = dx;
+    const at = s.w * 0.32;
+    const x = Math.abs(dx) <= at ? dx : Math.sign(dx) * (at + (Math.abs(dx) - at) * 0.3);
+    s.row.style.transform = `translateX(${x}px)`;
+    s.wrap.dataset.dir = dx < 0 ? 'left' : 'right';
+    s.wrap.classList.toggle('armed', Math.abs(dx) > at);
+  });
+  main.addEventListener('pointerup', e => {
+    if (!s || e.pointerId !== s.id) return;
+    const cur = s;
+    s = null;
+    if (cur.axis !== 'x') return;
+    swiped = true;  // the click that follows a swipe doesn't open the row
+    setTimeout(() => { swiped = false; }, 0);
+    const speed = Math.abs(cur.dx) / Math.max(1, e.timeStamp - cur.t0);
+    const go = Math.abs(cur.dx) > cur.w * 0.32 || (speed > 0.4 && Math.abs(cur.dx) > 48);
+    const id = cur.row.dataset.open;
+    if (go && cur.dx < 0) { cur.wrap.classList.remove('dragging'); swipeDelete(cur.wrap, id); return; }
+    reset(cur);
+    if (go) swipeStatus(id);
+  });
+  main.addEventListener('pointercancel', e => { if (s && e.pointerId === s.id) { if (s.axis === 'x') reset(s); s = null; } });
+}
+
+function swipeDelete(wrap, id) {
+  track('swipe');
+  if (reduceMotion.matches) { deleteRec(id); return; }
+  // Off to the left, then the gap closes
+  wrap.querySelector('.row').style.transform = 'translateX(-100%)';
+  wrap.style.height = wrap.offsetHeight + 'px';
+  requestAnimationFrame(() => { wrap.classList.add('gone'); wrap.style.height = '0px'; });
+  setTimeout(() => deleteRec(id), 240);
+}
+
+function swipeStatus(id) {
+  const r = items[id];
+  if (!r) return;
+  const prev = { status: r.status, beenAt: r.beenAt ?? null };
+  const next = NEXT[r.status];
+  const p = { status: next };
+  if (!r.beenAt) p.beenAt = Date.now();
+  patch(id, p);
+  track(next, r.category);
+  track('swipe');
+  toast(next === 'loved' ? `Loved ${r.name}` : r.status === 'loved' ? `${r.name} back to Tried` : `Tried ${r.name}`, () => patch(id, prev));
 }
 
 function emptyFor() {
@@ -753,8 +914,9 @@ function emptyFor() {
 
 function renderHome() {
   const recs = all();
+  const sent = status === 'all' && !place.city ? inboxHtml() : '';
   if (!recs.length) {
-    return `<div class="empty">
+    return `${sent}<div class="empty">
       <h2>Nothing saved yet</h2>
       <p>When someone recommends something, type it below the way you'd text it.</p>
       <div class="examples">
@@ -765,10 +927,10 @@ function renderHome() {
   }
 
   const shown = recs.filter(r => statusMatch(r) && placeMatch(r));
-  if (!shown.length) return emptyFor();
+  if (!shown.length) return sent + emptyFor();
 
   // One group per category: the three most recent, then a way into the rest
-  return CATEGORIES.map(c => {
+  return sent + CATEGORIES.map(c => {
     const inCat = shown.filter(r => r.category === c.id).sort(byRecent);
     if (!inCat.length) return '';
     return `<section class="group">
@@ -1200,6 +1362,7 @@ function setWhen(id) {
 }
 
 function deleteRec(id) {
+  track('delete');
   const copy = { ...items[id] };
   closeSheet();
   delete items[id];
@@ -1219,9 +1382,12 @@ function openAccount() {
       <p>${esc(user.email || user.phoneNumber || '')}</p>
       <p class="sub">Everything is saved to this account, so it's on any phone or computer you sign in on.</p>
     </div>
-    <div class="list opts"><button class="opt" data-pub-manage>
-      <span class="opt-name">Public page</span><span class="opt-count">${pubCfg.name ? esc(listJoin(pubLabels()) || 'Nothing on it') : 'Off'} ${ICON.chevron}</span>
-    </button></div>
+    <div class="list opts">
+      <button class="opt" data-friends><span class="opt-name">Friends</span><span class="opt-count">${friendList().length || 'Add'} ${ICON.chevron}</span></button>
+      <button class="opt" data-pub-manage><span class="opt-name">Public page</span><span class="opt-count">${pubCfg.name ? esc(listJoin(pubLabels()) || 'Nothing on it') : 'Off'} ${ICON.chevron}</span></button>
+      <button class="opt" data-ideas><span class="opt-name">Ideas</span><span class="opt-count">Suggest or vote ${ICON.chevron}</span></button>
+      ${isAdmin ? `<a class="opt" href="#/usage"><span class="opt-name">Usage</span><span class="opt-count">Only you see this ${ICON.chevron}</span></a>` : ''}
+    </div>
     <div class="account-actions">
       <button class="btn sec wide" data-invite>Invite a friend</button>
       <button class="btn sec wide" data-signout>Sign out</button>
@@ -1347,6 +1513,7 @@ function drawShareSheet() {
   const names = s.recs.slice(0, 4).map(r => r.name).join(', ') + (n > 4 ? ` and ${n - 4} more` : '');
   const one = n === 1 && s.title === s.recs[0].name;
   $('sheet').innerHTML = `${sheetHead(one ? 'Share' : s.page ? `Share ${s.page.label}` : `Share ${n}`)}
+    ${n <= 20 ? friendsCard() : ''}
     ${s.page ? publicCard(s.page) : publicIntro()}
     <h3 class="sheet-sub">Or send ${n === 1 ? 'just this' : `these ${n}`} as a list</h3>
     <label class="field"><span>Title</span><input id="shareTitle" value="${esc(s.title)}" /></label>
@@ -1364,6 +1531,8 @@ function redrawSheet() {
   const v = $('sheet').dataset.view;
   if (v === 'share' && shareState) drawShareSheet();
   else if (v === 'public') drawPublic();
+  else if (v === 'friends') drawFriends();
+  else if (v === 'ideas') drawIdeas();
 }
 
 
@@ -1386,11 +1555,14 @@ function doShare() {
   const s = shareState;
   if (!s?.url) { toast('One moment'); return; }
   const text = s.recs.length === 1 && s.title === s.recs[0].name ? oneLine(s.recs[0]) : s.title;
+  track('share_list');
   shareOut(s.title, text, s.url).then(ok => { if (ok) closeSheet(); });
 }
 
 function invite() {
-  shareOut('Recs', 'This is what I use to keep track of things people recommend. Open it in Safari, sign in with Google, then tap Share and Add to Home Screen.', appUrl());
+  track('invite');
+  if (pubCfg.name) shareOut('Add me on Recs', 'Add me on Recs so we can send each other recs. Open it, sign in with Google, and tap Add.', pubUrl(pubCfg.name));
+  else shareOut('Recs', 'This is what I use to keep track of things people recommend. Open it in Safari, sign in with Google, then tap Share and Add to Home Screen.', appUrl());
 }
 
 // ── Public pages ──
@@ -1489,6 +1661,7 @@ async function setPublic(kind, label, on) {
     if (!name) { redrawSheet(); return; }
   }
   savePublic({ ...pubCfg, name, [k]: list });
+  if (on) track('public_on');
   redrawSheet();
 }
 
@@ -1516,6 +1689,7 @@ async function renamePub(want) {
 }
 
 function sharePub(key) {
+  track('share_page');
   const by = firstName();
   const city = pubCfg.cities?.[key], cat = pubCfg.shelves?.[key];
   const [title, text] = city ? [`${by} in ${city}`, `Where I went in ${city}`]
@@ -1626,7 +1800,11 @@ async function renderPub() {
     if (fresh) { $('sharedView').innerHTML = ''; $('sharedView').dataset.key = ''; }
     try { mine.data = await pub.get(name); } catch { mine.data = null; }
     if (pubPage !== mine || route().view !== 'pub') return;
+    if (mine.data && (!store || mine.data.uid !== store.uid)) track('page_view');
   }
+  let want = null;
+  try { want = sessionStorage.getItem('recs-friend'); } catch {}
+  if (store && want === name && pubPage.data) { try { sessionStorage.removeItem('recs-friend'); } catch {} addFriend(name); return; }
   const r = route();
   const data = pubPage.data;
   if (!data) { drawMissing('Nothing here', 'The link may be wrong, or the page was taken down.'); return; }
@@ -1681,7 +1859,9 @@ function drawProfile(data, name, by) {
   const latest = t => Math.max(0, ...t.recs.map(r => r.day));
   const trips = decodePages(data.trips, 'trip').sort((a, b) => latest(b) - latest(a));
   const shelves = decodePages(data.shelves, 'shelf').sort((a, b) => SHELF_CATS.indexOf(a.label) - SHELF_CATS.indexOf(b.label));
-  const key = `@${name}|${data.updatedAt}`;
+  const me = !!store && data.uid === store.uid;
+  const friend = !!friends[name];
+  const key = `@${name}|${data.updatedAt}|${!!store}|${friend}`;
   document.title = `${by}'s recs`;
   if (v.dataset.key === key) return;
   v.dataset.key = key;
@@ -1704,6 +1884,8 @@ function drawProfile(data, name, by) {
       <p class="eyebrow">Recs</p>
       <h1>${esc(by)}'s recs</h1>
       ${line ? `<p class="trip-sub">${line}</p>` : ''}
+      ${me ? '' : friend ? `<p class="friend-on">${ICON.check} Friends. Send ${esc(by)} recs from Share.</p>`
+        : `<button class="btn-primary add-friend" data-add-friend="${esc(name)}">Add ${esc(by)}</button>`}
     </header>
     ${places.some(r => r.lat) ? '<div class="pub-map"><div id="pubMap"></div></div>' : ''}
     ${trips.length ? `${shelves.length ? '<h2 class="pub-h">Places</h2>' : ''}<div class="list bare">${trips.map(pageRow).join('')}</div>` : ''}
@@ -1864,6 +2046,7 @@ function saveShared(list) {
     items[store.add(rec)] = rec;
     added.push(r.name);
   }
+  if (added.length) track('page_save');
   toast(added.length ? `Saved ${added.length === 1 ? added[0] : added.length + ' recs'}` : 'Already saved');
   drawShared();
 }
@@ -1884,6 +2067,281 @@ function wantSave(idx) {
   signIn();
 }
 
+// ── Friends: send a rec straight into someone's Recs ──
+// Everyone has a short name (@daksh), the same one their public page uses. Add someone from their page;
+// after that "for Daksh" in the add box, or Daksh in any Share sheet, sends it to them.
+// It lands in their "Sent to you", where they save it or let it go. Nothing goes into their list without them.
+let friends = {};   // { daksh: { by: 'Daksh', uid } }
+let inbox = {};     // what friends sent you
+let stats = null;   // usage counts
+let isAdmin = null;  // unknown until the database answers
+
+const friendList = () => Object.entries(friends).map(([name, f]) => ({ name, by: f.by || name, uid: f.uid }))
+  .filter(f => f.uid).sort((a, b) => a.by.localeCompare(b.by));
+function findFriend(word) {
+  const w = String(word).toLowerCase().replace(/^@/, '');
+  return friendList().find(f => f.name === w || f.by.toLowerCase() === w) || null;
+}
+
+function sendTo(friend, recs) {
+  const at = Date.now();
+  const out = recs.slice(0, 20).map(r => ({
+    name: r.name, category: r.category, note: r.note || '', where: r.where || '', city: r.city || '',
+    link: webUrl(r.link), lat: r.lat || 0, lng: r.lng || 0, st: r.status || 'todo',
+    from: firstName(), fromName: pubCfg.name || '', fromUid: store.uid, at,
+  }));
+  return Promise.all(out.map(x => store.send(friend.uid, x))).then(() => {
+    track('send');
+    toast(`Sent ${out.length === 1 ? out[0].name : `${out.length} recs`} to ${friend.by}`);
+    return true;
+  }, () => {
+    toast(`Couldn't send to ${friend.by} yet. The database rules need the inbox part.`);
+    return false;
+  });
+}
+
+async function addFriend(name) {
+  const data = pubPage?.data;
+  if (!store) {
+    try { sessionStorage.setItem('recs-friend', name); } catch {}
+    signIn();
+    return;
+  }
+  if (!data?.uid || data.uid === store.uid) return;
+  const by = String(data.by || name).slice(0, 40);
+  try { await store.setFriend(name, { by, uid: data.uid }); } catch { toast('Adding friends needs the new database rules'); return; }
+  friends = { ...friends, [name]: { by, uid: data.uid } };
+  // Tell them, so you're on their list too
+  store.send(data.uid, { kind: 'friend', name: '', from: firstName(), fromName: pubCfg.name || '', fromUid: store.uid, at: Date.now() }).catch(() => {});
+  track('friend_add');
+  toast(`Added ${by}. Send them recs from Share, or add "for ${by}".`);
+  $('sharedView').dataset.key = '';
+  renderPub();
+}
+
+// Someone who adds you, or sends you something, becomes your friend too
+function takeNotices() {
+  for (const [id, x] of Object.entries(inbox)) {
+    const name = slug(x.fromName || '');
+    if (name && x.fromUid && !friends[name] && x.fromUid !== store.uid) {
+      friends = { ...friends, [name]: { by: String(x.from || name).slice(0, 40), uid: x.fromUid } };
+      store.setFriend(name, friends[name]).catch(() => {});
+      if (x.kind === 'friend') toast(`${x.from || name} added you as a friend`);
+    }
+    if (x.kind === 'friend') { store.dropInbox(id); delete inbox[id]; }
+  }
+}
+
+const inboxList = () => Object.entries(inbox).filter(([, x]) => x.kind !== 'friend' && x.name).sort((a, b) => (b[1].at || 0) - (a[1].at || 0));
+
+function inboxHtml() {
+  const list = inboxList();
+  if (!list.length) return '';
+  return `<section class="group">
+    <div class="group-head static"><span>Sent to you</span><span class="group-count">${list.length}</span></div>
+    <div class="list">${list.map(([id, x]) => {
+      const cat = knownCat(x.category, x);
+      const did = { loved: `${x.from} loved it`, tried: `${x.from} tried it` }[x.st] || (x.from && `from ${x.from}`);
+      const meta = [did, cat, x.where && String(x.where).split(',')[0], x.at && ago(x.at)].filter(Boolean).join(' · ');
+      return `<div class="row in-row">
+        <span class="who" aria-hidden="true">${esc(String(x.from || '?')[0].toUpperCase())}</span>
+        <div class="row-body">
+          <div class="row-name">${esc(x.name)}</div>
+          ${x.note ? `<div class="row-note wrap">${esc(x.note)}</div>` : ''}
+          <div class="row-meta">${esc(meta)}</div>
+        </div>
+        <button class="row-act" data-in-save="${esc(id)}">Save</button>
+        <button class="in-x" data-in-drop="${esc(id)}" aria-label="Not for me">${ICON.x}</button>
+      </div>`;
+    }).join('')}</div>
+  </section>`;
+}
+
+// Everything from a friend is untrusted: known categories, web links, short text only
+function inboxSave(id) {
+  const x = inbox[id];
+  if (!x) return;
+  const now = Date.now();
+  const rec = {
+    name: String(x.name).slice(0, 200), category: knownCat(x.category, x), note: String(x.note || '').slice(0, 500),
+    from: String(x.from || '').slice(0, 40), where: String(x.where || '').slice(0, 100), link: webUrl(x.link), image: '',
+    status: 'todo', createdAt: now, updatedAt: now,
+  };
+  if (x.city) rec.city = String(x.city).slice(0, 80);
+  if (Number(x.lat) && Number(x.lng)) Object.assign(rec, { lat: Number(x.lat), lng: Number(x.lng), geo: 'ok', geoV: GEO_VERSION });
+  items[store.add(rec)] = rec;
+  store.dropInbox(id);
+  delete inbox[id];
+  render();
+  track('inbox_save', rec.category);
+  toast(`Saved ${rec.name}`);
+}
+
+function inboxDrop(id) {
+  const x = inbox[id];
+  if (!x) return;
+  store.dropInbox(id);
+  delete inbox[id];
+  render();
+  toast(`Let ${x.name} go`);
+}
+
+// The top of every Share sheet: send it to a friend
+function friendsCard() {
+  const fs = friendList();
+  if (!fs.length) {
+    return `<div class="pub-card"><button class="pub-head" data-friends>
+      <span><b>Send to a friend</b><small>Add friends to send recs straight into their Recs</small></span>${ICON.chevron}</button></div>`;
+  }
+  return `<h3 class="sheet-sub first">Send to a friend</h3>
+    <div class="send-chips">${fs.map(f => `<button class="chip" data-send="${esc(f.name)}">${esc(f.by)}</button>`).join('')}</div>`;
+}
+
+function openFriends() {
+  detailId = null;
+  shareState = null;
+  drawFriends();
+  openSheet();
+}
+
+function drawFriends() {
+  const url = pubCfg.name ? pubUrl(pubCfg.name) : '';
+  const fs = friendList();
+  $('sheet').innerHTML = `${sheetHead('Friends')}
+    <p class="hint">Friends can send recs straight into each other's Recs. To add someone, open their link and tap Add. To be added, send them yours.</p>
+    ${url ? `<div class="pub-card"><a class="pub-link first" href="${esc(url)}">${esc(prettyUrl(url))}</a><button class="btn wide" data-invite>Send my link</button></div>` : '<button class="btn wide" data-invite>Invite a friend</button>'}
+    ${fs.length ? `<h3 class="sheet-sub">${fs.length} ${fs.length === 1 ? 'friend' : 'friends'}</h3>
+      <div class="list opts">${fs.map(f => `<div class="opt friend-opt">
+        <a class="opt-name" href="#/@${esc(f.name)}">${esc(f.by)} <small>@${esc(f.name)}</small></a>
+        <button class="link-btn danger" data-unfriend="${esc(f.name)}">Remove</button>
+      </div>`).join('')}</div>` : ''}`;
+  delete $('sheet').dataset.id;
+  $('sheet').dataset.view = 'friends';
+}
+
+// ── Ideas: anyone can suggest one, everyone votes, the owner marks what's planned and done ──
+let ideas = {};
+let ideasOn = false;
+const IDEA_STATUS = ['', 'planned', 'building', 'done'];
+const IDEA_LABEL = { planned: 'Planned', building: 'Building', done: 'Done' };
+
+function openIdeas() {
+  detailId = null;
+  shareState = null;
+  if (!ideasOn) { ideasOn = true; store.listenIdeas(v => { ideas = v; redrawSheet(); }); }
+  drawIdeas();
+  openSheet();
+}
+
+function drawIdeas() {
+  // Keep what you're typing when the list updates under you
+  const draft = $('ideaText')?.value || '';
+  const typing = document.activeElement?.id === 'ideaText';
+  const list = Object.entries(ideas).filter(([, x]) => x?.text)
+    .map(([id, x]) => ({ id, ...x, n: Object.keys(x.votes || {}).length, mine: !!x.votes?.[store.uid] }))
+    .sort((a, b) => (a.status === 'done') - (b.status === 'done') || b.n - a.n || (b.at || 0) - (a.at || 0));
+  const row = x => `<div class="idea">
+      <button class="vote ${x.mine ? 'on' : ''}" data-vote="${esc(x.id)}" aria-pressed="${x.mine}" aria-label="Vote, ${x.n} so far">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M12 5l8 10H4z"/></svg><span>${x.n}</span>
+      </button>
+      <div class="row-body">
+        <div class="idea-text">${esc(x.text)}</div>
+        <div class="row-meta">${esc([x.by, x.at && ago(x.at)].filter(Boolean).join(' · '))}</div>
+      </div>
+      ${isAdmin ? `<button class="status-chip ${x.status || 'unset'}" data-idea-status="${esc(x.id)}">${IDEA_LABEL[x.status] || '+ status'}</button>`
+        : x.status ? `<span class="status-chip ${x.status}">${IDEA_LABEL[x.status]}</span>` : ''}
+    </div>`;
+  $('sheet').innerHTML = `${sheetHead('Ideas')}
+    <p class="hint">What would make Recs better? Add an idea, or vote for the ones you want most.</p>
+    <label class="field"><textarea id="ideaText" rows="2" maxlength="500" placeholder="I wish Recs could…" aria-label="Your idea">${esc(draft)}</textarea></label>
+    <button class="btn wide" data-idea-send>Add idea</button>
+    ${list.length ? `<div class="list ideas">${list.map(row).join('')}</div>` : '<p class="hint">No ideas yet. Be the first.</p>'}`;
+  delete $('sheet').dataset.id;
+  $('sheet').dataset.view = 'ideas';
+  if (typing) { const t = $('ideaText'); t.focus(); t.setSelectionRange(t.value.length, t.value.length); }
+}
+
+function sendIdea() {
+  const t = $('ideaText');
+  const text = t.value.trim();
+  if (text.length < 3) { t.focus(); return; }
+  // Cleared first, so the list redrawing under it can't bring the text back
+  t.value = '';
+  t.blur();
+  store.addIdea({ uid: store.uid, by: firstName(), text: text.slice(0, 500), at: Date.now() })
+    .then(() => { track('idea'); toast('Thanks. Your idea is on the list.'); },
+      () => { if ($('ideaText')) $('ideaText').value = text; toast('Ideas need the new database rules'); });
+}
+
+// ── Usage: what people do, counted per day ──
+function track(e, cat) {
+  if (!stats) return;
+  const keys = [e];
+  if (cat) keys.push(`${e}~${slug(cat)}`);
+  stats.bump(isoDay(Date.now()), keys, store?.uid || '');
+}
+
+const SUM = (days, data, k) => days.reduce((n, d) => n + (data[d]?.n?.[k] || 0), 0);
+const PEOPLE = (days, data) => new Set(days.flatMap(d => Object.keys(data[d]?.u || {}))).size;
+
+async function renderUsage() {
+  $('login').classList.add('hidden');
+  $('app').classList.add('hidden');
+  $('sharedView').classList.remove('hidden');
+  closeSheet();
+  document.title = 'Usage';
+  const v = $('sharedView');
+  v.dataset.key = '';
+  if (store && isAdmin === null) { v.innerHTML = ''; return; }  // still asking; drawn again once we know
+  if (!store || !isAdmin) { drawMissing('Nothing here', 'Usage is only for the owner.'); return; }
+  const days = Array.from({ length: 30 }, (_, i) => isoDay(Date.now() - (29 - i) * 864e5));
+  let data = {};
+  try { data = await stats.read(days[0]); } catch { drawMissing('Usage didn\'t load', 'The database rules may need the stats part.'); return; }
+  if (route().view !== 'usage') return;
+  const last = days.slice(-7), prev = days.slice(-14, -7);
+  const tile = (label, cur, before) => {
+    const d = cur - before;
+    return `<div class="kpi"><span class="kpi-label">${label}</span><span class="kpi-num">${cur}</span>
+      <span class="kpi-was">${d === 0 ? 'same as' : d > 0 ? `up ${d} from` : `down ${-d} from`} ${before} the week before</span></div>`;
+  };
+  const sumBoth = keys => [last, prev].map(ds => keys.reduce((n, k) => n + SUM(ds, data, k), 0));
+  const [aNow, aWas] = [PEOPLE(last, data), PEOPLE(prev, data)];
+  const tiles = [
+    ['People', aNow, aWas], ['Added', ...sumBoth(['add'])], ['Tried or loved', ...sumBoth(['tried', 'loved'])],
+    ['Shared', ...sumBoth(['share_list', 'share_page', 'send'])], ['Page views', ...sumBoth(['page_view'])], ['Saved from friends', ...sumBoth(['inbox_save', 'page_save'])],
+  ].map(t => tile(...t)).join('');
+  const daily = days.map(d => PEOPLE([d], data));
+  const top = Math.max(1, ...daily);
+  const fmt = d => new Date(d + 'T12:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const bars = days.map((d, i) => `<span class="bar" style="--h:${daily[i] / top}" data-tip="${esc(fmt(d))}: ${daily[i]} ${daily[i] === 1 ? 'person' : 'people'}" title="${esc(fmt(d))}: ${daily[i]}"></span>`).join('');
+  const cats = CATEGORIES.map(c => [c.id, SUM(days, data, `add~${slug(c.id)}`), SUM(days, data, `loved~${slug(c.id)}`)]).filter(c => c[1] || c[2]).sort((a, b) => b[1] - a[1] || b[2] - a[2]);
+  const cmax = Math.max(1, ...cats.map(c => c[1]));
+  const swipes = sumBoth(['swipe'])[0], ideasN = sumBoth(['idea'])[0];
+  const anyData = days.some(d => data[d]);
+  v.innerHTML = `
+    <header class="shared-head">
+      <p class="eyebrow">Recs${DEMO ? ' · sample, this browser only' : ''}</p>
+      <h1>Usage</h1>
+      <p class="trip-sub">Last 7 days, against the 7 before. ${PEOPLE(days, data)} ${PEOPLE(days, data) === 1 ? 'person' : 'people'} in 30 days.</p>
+    </header>
+    ${anyData ? '' : '<p class="hint">No counts yet. They start as people use this version of the app.</p>'}
+    <div class="kpis">${tiles}</div>
+    <h2 class="pub-h">People each day</h2>
+    <div class="chart">
+      <span class="chart-max">${top}</span>
+      <div class="bars" role="img" aria-label="People active each day, last 30 days, most ${top}">${bars}</div>
+      <div class="chart-axis"><span>${fmt(days[0])}</span><span id="barTip" aria-live="polite">Tap a bar</span><span>Today</span></div>
+    </div>
+    ${cats.length ? `<h2 class="pub-h">What people add, 30 days</h2>
+      <div class="list rank">${cats.map(([c, n, l]) => `<div class="rank-row">
+        <span class="rank-name">${esc(c)}</span>
+        <span class="rank-bar"><i style="--w:${n / cmax}"></i></span>
+        <span class="rank-num">${n}${l ? ` <small>· ${l} loved</small>` : ''}</span>
+      </div>`).join('')}</div>` : ''}
+    <p class="hint usage-foot">This week: ${swipes} swipes, ${ideasN} new ${ideasN === 1 ? 'idea' : 'ideas'}. Counts only, never what anyone saved.</p>
+    <div class="shared-foot"><button class="btn sec wide" data-ideas>Open ideas</button>${footNote()}</div>`;
+}
+
 // ── Adding ──
 function updatePreview() {
   const input = $('addInput');
@@ -1892,6 +2350,7 @@ function updatePreview() {
   const box = $('preview');
   if (!text) {
     override = null;
+    sendMode(null);
     $('picker').classList.add('hidden');
     const show = document.activeElement === input;
     box.innerHTML = show ? `<p class="pv-formula">${formula()}</p>` : '';
@@ -1901,7 +2360,9 @@ function updatePreview() {
   const p = parse(text, override, route().cat, logging());
   const place = CAT[p.category].action === 'map' || p.category === 'Other';
   const part = (w, v) => `<span class="pv-part"><i>${w}</i> ${esc(v)}</span>`;
-  const add = w => `<button class="pv-add" data-insert="${w}">+ ${w}</button>`;
+  // No "+ for" while you're already typing a "for" name
+  const typingKw = raw.match(/(?:^|[\s,])(from|in|near|for)\s+[^,;.]*$/i)?.[1].toLowerCase();
+  const add = w => w === typingKw ? '' : `<button class="pv-add" data-insert="${w}">+ ${w}</button>`;
   const when = logging() ? `<span class="pv-status">${status === 'loved' ? 'Loved' : 'Tried'}${p.beenAt ? ' yesterday' : ''}</span>` : '';
   const sugg = suggestions(raw);
   box.innerHTML = `
@@ -1916,25 +2377,40 @@ function updatePreview() {
       ${p.from ? part('from', p.from) : ''}
       ${p.note ? `<span class="pv-note">${esc(p.note)}</span>` : ''}
       ${p.link ? '<span class="pv-part"><i>link</i></span>' : ''}
+      ${p.to ? `<span class="pv-part to"><i>for</i> ${esc(p.to.by)}</span>` : ''}
       ${!p.where && place && !logging() ? add('in') : ''}
-      ${!p.from ? add('from') : ''}
+      ${!p.from && !p.to ? add('from') : ''}
+      ${!p.to && !logging() && friendList().length ? add('for') : ''}
     </div>`;
   box.classList.remove('hidden');
+  sendMode(p.to);
   // Typing at the end: keep the newest part in view
   const row = box.querySelector('.pv-row');
   if (input.selectionStart === raw.length) row.scrollLeft = row.scrollWidth;
   if (!$('picker').classList.contains('hidden')) renderPicker(p.category);
 }
 
-// Right after "from" or "in", the people and places you've used before, so names stay spelled one way
+// The add button says what will happen: save it, or send it
+function sendMode(to) {
+  const b = $('addBtn');
+  const mode = to ? 'send' : 'save';
+  if (b.dataset.mode === mode) return;
+  b.dataset.mode = mode;
+  b.innerHTML = to ? ICON.send : ICON.plus;
+  b.setAttribute('aria-label', to ? `Send to ${to.by}` : 'Save');
+  b.classList.toggle('sending', !!to);
+}
+
+// Right after "from", "in" or "for", the people, places and friends you've used before, so names stay spelled one way
 function suggestions(raw) {
-  const m = raw.match(/(?:^|[\s,])(from|in|near)\s+([^,;.]*)$/i);
+  const m = raw.match(/(?:^|[\s,])(from|in|near|for)\s+([^,;.]*)$/i);
   if (!m) return '';
-  const who = m[1].toLowerCase() === 'from';
+  const kw = m[1].toLowerCase();
   const typed = m[2].trim().toLowerCase();
   const seen = new Map();
-  for (const r of all()) {
-    for (const v of who ? [r.from] : [hoodOf(r), cityOf(r)]) {
+  if (kw === 'for') for (const f of friendList()) seen.set(f.by.toLowerCase(), { v: f.by, n: 1 });
+  else for (const r of all()) {
+    for (const v of kw === 'from' ? [r.from] : [hoodOf(r), cityOf(r)]) {
       if (!v) continue;
       const k = v.toLowerCase();
       const e = seen.get(k) || { v, n: 0 };
@@ -1958,7 +2434,7 @@ function insertWord(w) {
 
 function complete(v) {
   const input = $('addInput');
-  input.value = input.value.replace(/((?:^|[\s,])(?:from|in|near)\s+)[^,;.]*$/i, (_, a) => a + v);
+  input.value = input.value.replace(/((?:^|[\s,])(?:from|in|near|for)\s+)[^,;.]*$/i, (_, a) => a + v);
   caretEnd(input);
 }
 
@@ -1984,6 +2460,11 @@ function save() {
   if (!p.name) { toast('Add a name first'); return; }
 
   const done = () => { input.value = ''; override = null; updatePreview(); input.blur(); };
+  // Written for a friend: it goes to them, not into your list
+  if (p.to) {
+    sendTo(p.to, [{ name: p.name, category: p.category, note: p.note, where: p.where, link: p.link, status: 'todo' }]).then(ok => { if (ok) done(); });
+    return;
+  }
   const dupe = all().find(r => r.name.toLowerCase() === p.name.toLowerCase() && (r.category === p.category || p.auto));
   // Logging a place you'd saved as a rec ticks off the rec instead of making a second one
   if (dupe && been) {
@@ -2008,6 +2489,8 @@ function save() {
   if (been) rec.beenAt = p.beenAt || now;
   if (p.auto) rec.auto = true;
   const id = store.add(rec);
+  track('add', p.category);
+  if (been) track(status, p.category);
 
   done();
   toast(`Saved to ${p.category}`);
@@ -2100,13 +2583,27 @@ function bindEvents() {
 
   document.addEventListener('click', e => {
     const t = e.target;
+    if (swiped) { swiped = false; e.preventDefault(); return; }
     if (t.closest('a')) return;
 
-    const el = t.closest('[data-pub-manage],[data-insert],[data-complete],[data-pub-share],[data-toggle-city],[data-share-list],[data-share-one],[data-share-go],[data-invite],[data-save],[data-save-all],[data-go-home],[data-cat],[data-open],[data-example],[data-status],[data-status-filter],[data-places],[data-place],[data-unpinned],[data-focus],[data-setcat],[data-delete],[data-close],[data-pick],[data-pickcat],[data-signout]');
+    const el = t.closest('[data-in-save],[data-in-drop],[data-send],[data-friends],[data-unfriend],[data-ideas],[data-vote],[data-idea-send],[data-idea-status],[data-add-friend],[data-pub-manage],[data-insert],[data-complete],[data-pub-share],[data-toggle-city],[data-share-list],[data-share-one],[data-share-go],[data-invite],[data-save],[data-save-all],[data-go-home],[data-cat],[data-open],[data-example],[data-status],[data-status-filter],[data-places],[data-place],[data-unpinned],[data-focus],[data-setcat],[data-delete],[data-close],[data-pick],[data-pickcat],[data-signout]');
     if (!el) return;
     const d = el.dataset;
 
-    if (d.insert !== undefined) insertWord(d.insert);
+    if (d.inSave !== undefined) inboxSave(d.inSave);
+    else if (d.inDrop !== undefined) inboxDrop(d.inDrop);
+    else if (d.send !== undefined) {
+      const f = friendList().find(x => x.name === d.send);
+      if (f && shareState) sendTo(f, shareState.recs).then(ok => { if (ok) { el.classList.add('on'); el.disabled = true; el.textContent = `Sent to ${f.by}`; } });
+    }
+    else if (d.friends !== undefined) openFriends();
+    else if (d.unfriend !== undefined) { store.setFriend(d.unfriend, null); const f = friends[d.unfriend]; friends = { ...friends }; delete friends[d.unfriend]; drawFriends(); toast(`Removed ${f?.by || d.unfriend}`); }
+    else if (d.ideas !== undefined) openIdeas();
+    else if (d.vote !== undefined) { const x = ideas[d.vote]; const on = !x?.votes?.[store.uid]; store.vote(d.vote, on).catch(() => toast('Voting needs the new database rules')); if (on) track('vote'); }
+    else if (d.ideaSend !== undefined) sendIdea();
+    else if (d.ideaStatus !== undefined && isAdmin) { const cur = ideas[d.ideaStatus]?.status || ''; store.ideaStatus(d.ideaStatus, IDEA_STATUS[(IDEA_STATUS.indexOf(cur) + 1) % IDEA_STATUS.length]); }
+    else if (d.addFriend !== undefined) addFriend(d.addFriend);
+    else if (d.insert !== undefined) insertWord(d.insert);
     else if (d.complete !== undefined) complete(d.complete);
     else if (d.pubShare !== undefined) sharePub(d.pubShare);
     else if (d.toggleCity !== undefined) toggleCity(el);
@@ -2141,6 +2638,7 @@ function bindEvents() {
       const p = { status: d.status };
       if (d.status !== 'todo' && !items[detailId].beenAt) p.beenAt = Date.now();
       patch(detailId, p);
+      if (d.status !== 'todo') track(d.status, items[detailId].category);
     }
     else if (d.setcat !== undefined) patch(detailId, { category: d.setcat, auto: null });
     else if (d.delete !== undefined) deleteRec(detailId);
@@ -2158,6 +2656,12 @@ function bindEvents() {
   });
 
   bindSheetDrag();
+  bindSwipe();
+
+  // Usage chart: hover or tap a bar to read it
+  const readBar = e => { const b = e.target.closest?.('.bar[data-tip]'); if (b && $('barTip')) $('barTip').textContent = b.dataset.tip; };
+  document.addEventListener('pointerover', readBar);
+  document.addEventListener('click', readBar);
 }
 
 // Saves from before a category split are moved once, in place
@@ -2183,17 +2687,28 @@ function start(s, u) {
     ? `<img src="${esc(u.photoURL)}" alt="" referrerpolicy="no-referrer" />`
     : esc((u.displayName || '?')[0].toUpperCase());
   store.listen(data => { items = data; migrate(); loaded = true; render(); queueGeo(); syncPub(); });
+  let claimed = false;
   store.listenPublic(v => {
     pubCfg = v || {};
+    // Everyone gets a short name once, so friends can find them; quietly, and only if the rules allow it
+    if (!pubCfg.name && !claimed) {
+      claimed = true;
+      claimName(firstName()).then(name => { pubErr = ''; if (name && !pubCfg.name) savePublic({ ...pubCfg, name }); });
+    }
     syncPub();
     redrawSheet();
   });
+  store.listenFriends(v => { friends = v || {}; if (route().view === 'pub') { $('sharedView').dataset.key = ''; renderPub(); } redrawSheet(); });
+  store.listenInbox(v => { inbox = v || {}; takeNotices(); if (route().view === 'home') render(); });
+  store.isAdmin().then(v => { isAdmin = v; if (route().view === 'usage') renderUsage(); });
+  track('open');
 }
 
 // Shared links open for anyone; everything else needs signing in
 function paint() {
   if (route().view === 'shared') renderShared();
   else if (route().view === 'pub') renderPub();
+  else if (route().view === 'usage' && store) renderUsage();
   else if (store) render();
   else { $('sharedView').classList.add('hidden'); $('app').classList.add('hidden'); $('login').classList.remove('hidden'); }
 }
@@ -2204,6 +2719,7 @@ bindEvents();
 
 if (DEMO) {
   pub = demoPub();
+  stats = demoStats();
   start(demoStore(), { displayName: 'Demo', email: 'Sample data, saved only in this browser. Sign out resets it.' });
 } else {
   const app = initializeApp(firebaseConfig);
@@ -2211,6 +2727,7 @@ if (DEMO) {
   setPersistence(auth, indexedDBLocalPersistence).catch(() => setPersistence(auth, browserLocalPersistence));
   const db = getDatabase(app);
   pub = firebasePub(db);
+  stats = firebaseStats(db);
   let started = false;
 
   signIn = () => signInWithPopup(auth, new GoogleAuthProvider()).catch(() => toast('Sign-in failed. Try again.'));

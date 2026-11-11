@@ -1,0 +1,70 @@
+{
+  "rules": {
+    "users": {
+      "$uid": {
+        ".read": "$uid === auth.uid",
+        ".write": "$uid === auth.uid"
+      }
+    },
+    "sharedLists": {
+      "$code": {
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    },
+    "pub": {
+      "$name": {
+        ".read": true,
+        ".write": "auth != null && (data.exists() ? data.child('uid').val() === auth.uid : newData.child('uid').val() === auth.uid)",
+        ".validate": "$name.matches(/^[a-z0-9][a-z0-9-]+$/) && $name.length <= 24 && newData.child('uid').val() === auth.uid"
+      }
+    },
+    "inbox": {
+      "$uid": {
+        ".read": "$uid === auth.uid",
+        "$id": {
+          ".write": "auth != null && ($uid === auth.uid || (!data.exists() && newData.child('fromUid').val() === auth.uid))",
+          ".validate": "newData.child('fromUid').isString() && newData.child('name').isString() && newData.child('name').val().length <= 200"
+        }
+      }
+    },
+    "ideas": {
+      ".read": "auth != null",
+      "$id": {
+        ".write": "auth != null && ((!data.exists() && newData.child('uid').val() === auth.uid) || root.child('admins').child(auth.uid).val() === true)",
+        ".validate": "newData.child('text').isString() && newData.child('text').val().length <= 500",
+        "votes": {
+          "$voter": {
+            ".write": "auth != null && auth.uid === $voter",
+            ".validate": "newData.val() === true"
+          }
+        },
+        "status": {
+          ".write": "auth != null && root.child('admins').child(auth.uid).val() === true"
+        }
+      }
+    },
+    "stats": {
+      ".read": "auth != null && root.child('admins').child(auth.uid).val() === true",
+      "$day": {
+        "n": {
+          "$event": {
+            ".write": "auth != null || $event === 'page_view'",
+            ".validate": "newData.isNumber()"
+          }
+        },
+        "u": {
+          "$uid": {
+            ".write": "auth != null && auth.uid === $uid",
+            ".validate": "newData.val() === true"
+          }
+        }
+      }
+    },
+    "admins": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid"
+      }
+    }
+  }
+}

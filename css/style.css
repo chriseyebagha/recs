@@ -325,7 +325,7 @@ main {
 .row:active { background: var(--press); }
 
 /* Hairlines start after the status mark */
-.row + .row::before, .more::before, .opt + .opt::before {
+.row + .row::before, .sw + .sw > .row::before, .more::before, .opt + .opt::before {
   content: '';
   position: absolute;
   top: 0;
@@ -1111,3 +1111,109 @@ main {
 .link-btn.manage { display: inline-flex; align-items: center; gap: 2px; padding: 0 0 12px; font-size: 0.88rem; }
 .pub-link.first { padding-top: 12px; }
 .hint.err { color: var(--danger); }
+
+/* ── Swipe: left deletes (red), right moves it on (green); the action wakes up once letting go will do it ── */
+.sw { position: relative; overflow: hidden; }
+.sw > .row { background: var(--surface); touch-action: pan-y; transition: transform 240ms var(--ease-out), background-color 120ms ease; }
+.sw > .row:active { background: linear-gradient(var(--press), var(--press)) var(--surface); }
+@media (hover: hover) and (pointer: fine) { .sw > .row:hover { background: linear-gradient(var(--press), var(--press)) var(--surface); } }
+.sw.dragging > .row { transition: none; }
+.sw-bg {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 20px;
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 600;
+  visibility: hidden;
+}
+.sw[data-dir] .sw-bg { visibility: visible; }
+.sw[data-dir="left"] .sw-bg { background: var(--danger); }
+.sw[data-dir="right"] .sw-bg { background: var(--accent); color: var(--on-accent); }
+.sw[data-dir="left"] .sw-l, .sw[data-dir="right"] .sw-r { opacity: 0; }
+.sw-bg span { display: flex; align-items: center; gap: 6px; opacity: 0.55; transform: scale(0.88); transition: transform 180ms var(--ease-out), opacity 180ms ease; }
+.sw.armed .sw-bg span { opacity: 1; transform: scale(1); }
+.sw.gone { opacity: 0; transition: height 200ms var(--ease-out), opacity 160ms ease; }
+@media (prefers-reduced-motion: reduce) {
+  .sw > .row, .sw-bg span, .sw.gone { transition: none; }
+}
+
+/* ── Sending: the add button turns into Send when the rec is for a friend ── */
+.add-btn { transition: transform 160ms var(--ease-out), background-color 200ms ease; }
+.add-btn.sending { background: var(--text); color: var(--bg); }
+.pv-part.to { background: var(--accent); color: var(--on-accent); }
+.pv-part.to i { color: inherit; opacity: 0.8; }
+
+/* Share sheet: friends first */
+.sheet-sub.first { margin-top: 6px; }
+.send-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; }
+.send-chips .chip { background: var(--surface); color: var(--text); font-weight: 600; height: 36px; padding: 0 14px; border-radius: 18px; }
+.send-chips .chip.on { background: var(--accent-soft); color: var(--accent); }
+
+/* Sent to you */
+.group-head.static { cursor: default; }
+.in-row { cursor: default; gap: 10px; }
+.who {
+  width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0; align-self: flex-start;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--accent-soft); color: var(--accent); font-size: 0.78rem; font-weight: 700;
+}
+.in-x { width: 32px; height: 32px; margin-right: -6px; display: flex; align-items: center; justify-content: center; color: var(--text-3); border-radius: 50%; flex-shrink: 0; transition: transform 160ms var(--ease-out); }
+.in-x:active { transform: scale(0.9); }
+
+/* Friends */
+.friend-opt { align-items: center; padding: 10px 16px; }
+.friend-opt .opt-name { color: var(--text); text-decoration: none; font-weight: 600; }
+.friend-opt small { font-weight: 400; color: var(--text-3); margin-left: 4px; }
+.friend-opt .link-btn { padding: 6px 0; font-size: 0.85rem; }
+.add-friend { margin-top: 16px; max-width: 220px; min-height: 44px; }
+.friend-on { display: flex; align-items: center; gap: 6px; margin-top: 12px; font-size: 0.88rem; color: var(--accent); font-weight: 600; }
+
+/* Ideas */
+.ideas { margin-top: 18px; }
+.idea { position: relative; display: flex; align-items: flex-start; gap: 12px; padding: 12px 12px 12px 10px; }
+.idea + .idea::before { content: ''; position: absolute; top: 0; left: 58px; right: 0; height: 1px; background: var(--line); }
+.idea-text { font-size: 0.95rem; line-height: 1.35; font-weight: 500; }
+.vote {
+  flex-shrink: 0; width: 40px; padding: 6px 0; border-radius: 10px;
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  background: var(--surface-2); color: var(--text-2); font-size: 0.82rem; font-weight: 700; font-variant-numeric: tabular-nums;
+  transition: transform 160ms var(--ease-out), background-color 160ms ease, color 160ms ease;
+}
+.vote:active { transform: scale(0.94); }
+.vote.on { background: var(--accent); color: var(--on-accent); }
+.status-chip { flex-shrink: 0; align-self: center; font-size: 0.75rem; font-weight: 600; padding: 4px 9px; border-radius: 10px; background: var(--surface-2); color: var(--text-2); }
+.status-chip.planned { background: var(--accent-soft); color: var(--accent); }
+.status-chip.building { background: var(--text); color: var(--bg); }
+.status-chip.done { background: none; color: var(--text-3); border: 1px solid var(--line); }
+
+/* ── Usage: numbers first, then one chart, then a ranked list. One color; numbers in text colors. ── */
+.kpis { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 28px; }
+@media (min-width: 560px) { .kpis { grid-template-columns: repeat(3, 1fr); } }
+.kpi { background: var(--surface); border-radius: var(--radius); padding: 12px 14px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.kpi-label { font-size: 0.8rem; font-weight: 600; color: var(--text-2); }
+.kpi-num { font-size: 1.6rem; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; line-height: 1.15; }
+.kpi-was { font-size: 0.75rem; color: var(--text-3); line-height: 1.3; }
+.chart { position: relative; background: var(--surface); border-radius: var(--radius); padding: 22px 12px 10px; margin-bottom: 28px; }
+.chart-max { position: absolute; top: 6px; left: 12px; font-size: 0.72rem; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.bars { height: 120px; display: flex; align-items: flex-end; gap: 2px; border-bottom: 1px solid var(--line); }
+.bar { flex: 1; height: max(2px, calc(var(--h) * 100%)); background: var(--accent); border-radius: 4px 4px 0 0; cursor: pointer; transition: opacity 120ms ease; }
+@media (hover: hover) and (pointer: fine) { .bars:hover .bar:not(:hover) { opacity: 0.45; } }
+.chart-axis { display: flex; justify-content: space-between; margin-top: 6px; font-size: 0.72rem; color: var(--text-3); font-variant-numeric: tabular-nums; }
+#barTip { color: var(--text-2); font-weight: 600; }
+.rank { padding: 6px 0; margin-bottom: 16px; }
+.rank-row { display: grid; grid-template-columns: 7.5em 1fr auto; align-items: center; gap: 10px; padding: 7px 14px; font-size: 0.88rem; }
+.rank-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+.rank-bar { height: 8px; }
+.rank-bar i { display: block; height: 100%; width: max(4px, calc(var(--w) * 100%)); background: var(--accent); border-radius: 0 4px 4px 0; }
+.rank-num { font-variant-numeric: tabular-nums; font-weight: 600; text-align: right; }
+.rank-num small { color: var(--text-3); font-weight: 400; }
+.usage-foot { margin-top: 4px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .vote, .in-x, .add-btn { transition: none; }
+}
+.status-chip.unset { background: none; border: 1px dashed var(--text-3); color: var(--text-3); font-weight: 500; }
