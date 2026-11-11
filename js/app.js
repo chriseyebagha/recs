@@ -203,6 +203,15 @@ function parse(raw, override, fallbackCat, been) {
     text = text.replace(url[0], ' ');
   }
   // "for Daksh": only a friend's name counts, so "good for dates" stays a note
+  // "with Monica and Ade": friends, or a capitalised name; "pasta with truffle" stays a note
+  const withs = [];
+  text = text.replace(/(?:^|[\s,;])with\s+([^,;.]{1,40}?)\s*(?=[,;.]|$)/giu, (m, list) => {
+    const parts = list.split(/\s+(?:and|&)\s+/i).map(x => x.trim().replace(/^@/, ''));
+    const found = parts.map(w => findFriend(w) || (/^\p{Lu}[\p{L}'-]*(\s\p{Lu}[\p{L}'-]*)?$/u.test(w) ? { by: w } : null));
+    if (!found.every(Boolean)) return m;
+    withs.push(...found);
+    return ' ';
+  });
   let to = null;
   text = text.replace(/(?:^|[\s,;])for\s+@?([\p{L}\w-]+)(?=[\s,;.]|$)/giu, (m, w) => {
     const f = !to && findFriend(w);
@@ -258,7 +267,7 @@ function parse(raw, override, fallbackCat, been) {
     try { name = new URL(link).hostname.replace(/^www\./, ''); } catch { name = link; }
     needsTitle = true;
   }
-  return { name, note, from, where, link, category, auto, needsTitle, beenAt, to };
+  return { name, note, from, where, link, category, auto, needsTitle, beenAt, to, withs };
 }
 
 // Title and picture for links from Spotify, YouTube, Vimeo and similar
@@ -555,6 +564,7 @@ function demoStats() {
 function firebasePub(db) {
   return {
     get: name => get(ref(db, `pub/${name}`)).then(s => s.val()),
+    ok: (name, uid) => get(ref(db, `pub/${name}/ok/${uid}`)).then(s => s.val() === true),
     set: (name, v) => set(ref(db, `pub/${name}`), v),
     remove: name => dbRemove(ref(db, `pub/${name}`)),
   };
@@ -566,6 +576,7 @@ function demoPub() {
   const write = d => { try { localStorage.setItem('recs-demo-pub', JSON.stringify(d)); } catch {} };
   return {
     get: async name => read()[name] || null,
+    ok: async (name, uid) => read()[name]?.ok?.[uid] === true,
     set: async (name, v) => { const d = read(); d[name] = v; write(d); },
     remove: async name => { const d = read(); delete d[name]; write(d); },
   };
@@ -812,7 +823,7 @@ function mark(r) {
 function row(r, opts = {}) {
   const when = r.status === 'todo' ? ago(r.createdAt) : `${isPlace(r) ? 'went' : 'tried'} ${wentText(r)}`;
   // A street address is too long for a row; its city says enough
-  const meta = [opts.showCat && r.category, hoodOf(r) || (ADDRESS.test(r.where || '') ? cityOf(r) : r.where), r.from && 'from ' + r.from, when].filter(Boolean).join(' · ');
+  const meta = [opts.showCat && r.category, hoodOf(r) || (ADDRESS.test(r.where || '') ? cityOf(r) : r.where), r.from && 'from ' + r.from, r.with && 'with ' + listJoin(Object.values(r.with).map(w => w.by)), when].filter(Boolean).join(' · ');
   const act = action(r);
   // Behind each row: what a swipe right or left will do
   return `<div class="sw"><div class="sw-bg" aria-hidden="true"><span class="sw-l">${r.status === 'todo' ? ICON.check : ICON.heart} ${NEXT_LABEL[r.status]}</span><span class="sw-r">Delete ${ICON.trash}</span></div>
@@ -1213,6 +1224,7 @@ function renderDetail() {
     $('dCat').textContent = r.category;
     $('dActions').innerHTML = parts.actions;
     $('dWhen').textContent = parts.when;
+    if (document.activeElement?.id !== 'withAdd') $('dWith').innerHTML = withRow(r);
     const row = $('dWhenRow');
     row.classList.toggle('hidden', r.status === 'todo');
     row.querySelector('span').textContent = isPlace(r) ? 'Went' : 'Tried';
@@ -1255,6 +1267,7 @@ function renderDetail() {
       <label class="field"><span>Where</span><input data-field="where" value="${esc(r.where)}" placeholder="Neighborhood or address" /></label>
       <label class="field"><span>City</span><input data-field="city" value="${esc(r.city)}" placeholder="${esc(cityFromWhere(r.where))}" /></label>
     </div>
+    <div class="field" id="dWith">${withRow(r)}</div>
     <label class="field"><span>Link</span><input data-field="link" type="url" inputmode="url" value="${esc(r.link)}" /></label>
     <div class="field"><span>Category</span>
       <div class="chips">${CATEGORIES.map(c =>
@@ -1473,6 +1486,7 @@ const decodeRec = a => ({
   lng: Number(a[7]) || 0,
   day: Number(a[8]) || 0,
   image: /^https?:\/\//i.test(a[9]) ? String(a[9]) : '',
+  with: Array.isArray(a[10]) ? a[10].slice(0, 6).map(x => [slug(String(x?.[0] || '')).slice(0, 24), String(x?.[1] || '').slice(0, 40)]).filter(x => x[0]) : [],
 });
 
 function oneLine(r) {
@@ -1601,10 +1615,12 @@ const count = (n, cat) => { const w = NOUN[cat] || (cat ? 'pick' : 'place'); ret
 function buildPub() {
   const notes = pubCfg.notes !== false;
   const enc = r => [r.name, r.category, isPlace(r) ? hoodOf(r) || '' : '', notes ? r.note || '' : '', r.status,
-    webUrl(r.link), r.lat ? r5(r.lat) : 0, r.lng ? r5(r.lng) : 0, toDay(beenTime(r)), webUrl(r.image)];
+    webUrl(r.link), r.lat ? r5(r.lat) : 0, r.lng ? r5(r.lng) : 0, toDay(beenTime(r)), webUrl(r.image),
+    r.showWith && r.with ? Object.entries(r.with).filter(([k]) => !k.startsWith('p-')).map(([k, w]) => [k, w.by]) : []];
   const pages = kind => Object.fromEntries(Object.entries(pubCfg[cfgKey(kind)] || {}).map(([key, label]) =>
     [key, { c: label, i: pageRecs(kind, label).sort(byRecent).slice(0, 300).map(enc) }]));
-  return { uid: store.uid, by: firstName(), trips: pages('trip'), shelves: pages('shelf') };
+  // ok: the friends you've let show you were there with them
+  return { uid: store.uid, by: firstName(), trips: pages('trip'), shelves: pages('shelf'), ok: pubCfg.ok || {} };
 }
 
 // Republish a moment after anything changes; only when the page would look different
@@ -1820,6 +1836,10 @@ async function renderPub() {
       key, at: data.updatedAt, by, name, title: label, page: t ? 'trip' : 'shelf', city: t ? label : '', cat: t ? '' : label,
       recs: (Array.isArray(page.i) ? page.i : []).map(decodeRec).filter(x => x.name),
     };
+    // A companion shows only if they've said yes to this person; asked live, so a no takes effect at once
+    const names = [...new Set(shared.recs.flatMap(x => x.with.map(w => w[0])))];
+    const yes = await Promise.all(names.map(h => pub.ok(h, data.uid).catch(() => false)));
+    shared.okWith = new Set(names.filter((_, i) => yes[i]));
   }
   drawShared();
   flushPending();
@@ -2001,7 +2021,8 @@ function drawShared() {
   const row = (r, i) => {
     // On a trip page the section says loved or tried; on a list it's said in words
     const did = !onPage && { loved: `${by} loved it`, tried: `${by} tried it` }[r.status];
-    const meta = [mixed && r.category, hoodOf(r) || (ADDRESS.test(r.where || '') ? cityOf(r) : r.where), did].filter(Boolean).join(' · ');
+    const went = (r.with || []).filter(([h]) => s.okWith?.has(h)).map(w => w[1]);
+    const meta = [mixed && r.category, hoodOf(r) || (ADDRESS.test(r.where || '') ? cityOf(r) : r.where), did, went.length && 'with ' + listJoin(went)].filter(Boolean).join(' · ');
     const act = action(r);
     const saved = signedIn && isSaved(r);
     // The mark is for your own list: empty on a list someone sent, left out on a trip page
@@ -2141,7 +2162,7 @@ function inboxHtml() {
     <div class="group-head static"><span>Sent to you</span><span class="group-count">${list.length}</span></div>
     <div class="list">${list.map(([id, x]) => {
       const cat = knownCat(x.category, x);
-      const did = { loved: `${x.from} loved it`, tried: `${x.from} tried it` }[x.st] || (x.from && `from ${x.from}`);
+      const did = x.kind === 'with' ? `${x.from} went with you` : { loved: `${x.from} loved it`, tried: `${x.from} tried it` }[x.st] || (x.from && `from ${x.from}`);
       const meta = [did, cat, x.where && String(x.where).split(',')[0], x.at && ago(x.at)].filter(Boolean).join(' · ');
       return `<div class="row in-row">
         <span class="who" aria-hidden="true">${esc(String(x.from || '?')[0].toUpperCase())}</span>
@@ -2150,7 +2171,7 @@ function inboxHtml() {
           ${x.note ? `<div class="row-note wrap">${esc(x.note)}</div>` : ''}
           <div class="row-meta">${esc(meta)}</div>
         </div>
-        <button class="row-act" data-in-save="${esc(id)}">Save</button>
+        <button class="row-act" data-in-save="${esc(id)}">${x.kind === 'with' ? 'I went too' : 'Save'}</button>
         <button class="in-x" data-in-drop="${esc(id)}" aria-label="Not for me">${ICON.x}</button>
       </div>`;
     }).join('')}</div>
@@ -2168,13 +2189,24 @@ function inboxSave(id) {
     status: 'todo', createdAt: now, updatedAt: now,
   };
   if (x.city) rec.city = String(x.city).slice(0, 80);
+  // "I went too": it goes in as tried, on their date, with them
+  if (x.kind === 'with') {
+    Object.assign(rec, { status: 'tried', beenAt: Number(x.beenAt) || now, from: '' });
+    if (['month', 'year'].includes(x.beenPrec)) rec.beenPrec = x.beenPrec;
+    const h = slug(x.fromName || '');
+    if (h) rec.with = { [h]: { by: String(x.from || h).slice(0, 40), uid: x.fromUid } };
+  }
   if (Number(x.lat) && Number(x.lng)) Object.assign(rec, { lat: Number(x.lat), lng: Number(x.lng), geo: 'ok', geoV: GEO_VERSION });
   items[store.add(rec)] = rec;
   store.dropInbox(id);
   delete inbox[id];
   render();
   track('inbox_save', rec.category);
-  toast(`Saved ${rec.name}`);
+  // Asked once per friend: may they show you were there?
+  if (x.kind === 'with' && x.fromUid && pubCfg.ok?.[x.fromUid] === undefined) {
+    toast(`Added. Let ${x.from} show you were there on their page?`, () => setOk(x.fromUid, true), 'Allow');
+    savePublic({ ...pubCfg, ok: { ...(pubCfg.ok || {}), [x.fromUid]: false } });
+  } else toast(`Saved ${rec.name}`);
 }
 
 function inboxDrop(id) {
@@ -2213,10 +2245,60 @@ function drawFriends() {
     ${fs.length ? `<h3 class="sheet-sub">${fs.length} ${fs.length === 1 ? 'friend' : 'friends'}</h3>
       <div class="list opts">${fs.map(f => `<div class="opt friend-opt">
         <a class="opt-name" href="#/@${esc(f.name)}">${esc(f.by)} <small>@${esc(f.name)}</small></a>
+        <label class="can-show" title="Can show you were there on their page"><small>Show me</small><input type="checkbox" data-ok="${esc(f.uid)}" ${pubCfg.ok?.[f.uid] ? 'checked' : ''} /></label>
         <button class="link-btn danger" data-unfriend="${esc(f.name)}">Remove</button>
       </div>`).join('')}</div>` : ''}`;
   delete $('sheet').dataset.id;
   $('sheet').dataset.view = 'friends';
+}
+
+// ── Who you went with ──
+// Private by default. A tagged friend gets "went with you" and can add it to their own list in one tap.
+// On a public page a companion shows only when both say yes: you per place (showWith), they once per friend (pub ok).
+const withObj = list => Object.fromEntries(list.map(w => w.name ? [w.name, { by: w.by, uid: w.uid }] : ['p-' + slug(w.by), { by: w.by }]));
+
+function tellWith(r, keys) {
+  for (const k of keys) {
+    const f = friends[k];
+    if (!f?.uid || k.startsWith('p-')) continue;
+    store.send(f.uid, { kind: 'with', name: r.name, category: r.category, note: '', where: r.where || '', city: r.city || '',
+      lat: r.lat || 0, lng: r.lng || 0, beenAt: beenTime(r), beenPrec: r.beenPrec || '', st: 'tried',
+      from: firstName(), fromName: pubCfg.name || '', fromUid: store.uid, at: Date.now() }).catch(() => {});
+  }
+  track('with');
+}
+
+function withRow(r) {
+  const tagged = Object.entries(r.with || {});
+  const more = friendList().filter(f => !r.with?.[f.name]);
+  const anyFriend = tagged.some(([k]) => !k.startsWith('p-'));
+  return `<span>With</span>
+    <div class="chips with-chips">
+      ${tagged.map(([k, w]) => `<button class="chip on" data-unwith="${esc(k)}" aria-label="Remove ${esc(w.by)}">${esc(w.by)} ${ICON.x}</button>`).join('')}
+      ${more.length ? `<label class="chip add-with">+ friend<select id="withAdd" aria-label="Add who you went with"><option value=""></option>${more.map(f => `<option value="${esc(f.name)}">${esc(f.by)}</option>`).join('')}</select></label>` : tagged.length ? '' : '<span class="hint inline">Type "with Monica" when you add a place.</span>'}
+    </div>
+    ${anyFriend ? `<label class="toggle with-show"><span>Show them on my public page<small>Only friends who've said yes</small></span><input type="checkbox" id="showWith" ${r.showWith ? 'checked' : ''} /></label>` : ''}`;
+}
+
+function addWith(id, name) {
+  const f = friends[name];
+  if (!f) return;
+  patch(id, { with: { ...(items[id].with || {}), [name]: { by: f.by, uid: f.uid } } });
+  tellWith({ id, ...items[id] }, [name]);
+  toast(`Tagged ${f.by}. They can add it to theirs.`);
+}
+
+function removeWith(id, key) {
+  const w = { ...(items[id]?.with || {}) };
+  const by = w[key]?.by;
+  delete w[key];
+  patch(id, { with: Object.keys(w).length ? w : null, ...(Object.keys(w).length ? {} : { showWith: null }) });
+  toast(`Removed ${by}`);
+}
+
+function setOk(uid, on) {
+  savePublic({ ...pubCfg, ok: { ...(pubCfg.ok || {}), [uid]: on } });
+  pubLast = '';
 }
 
 // ── Ideas: anyone can suggest one, everyone votes, the owner marks what's planned and done ──
@@ -2361,7 +2443,7 @@ function updatePreview() {
   const place = CAT[p.category].action === 'map' || p.category === 'Other';
   const part = (w, v) => `<span class="pv-part"><i>${w}</i> ${esc(v)}</span>`;
   // No "+ for" while you're already typing a "for" name
-  const typingKw = raw.match(/(?:^|[\s,])(from|in|near|for)\s+[^,;.]*$/i)?.[1].toLowerCase();
+  const typingKw = raw.match(/(?:^|[\s,])(from|in|near|for|with)\s+[^,;.]*$/i)?.[1].toLowerCase();
   const add = w => w === typingKw ? '' : `<button class="pv-add" data-insert="${w}">+ ${w}</button>`;
   const when = logging() ? `<span class="pv-status">${status === 'loved' ? 'Loved' : 'Tried'}${p.beenAt ? ' yesterday' : ''}</span>` : '';
   const sugg = suggestions(raw);
@@ -2378,6 +2460,7 @@ function updatePreview() {
       ${p.note ? `<span class="pv-note">${esc(p.note)}</span>` : ''}
       ${p.link ? '<span class="pv-part"><i>link</i></span>' : ''}
       ${p.to ? `<span class="pv-part to"><i>for</i> ${esc(p.to.by)}</span>` : ''}
+      ${p.withs.length ? `<span class="pv-part"><i>with</i> ${esc(listJoin(p.withs.map(w => w.by)))}</span>` : ''}
       ${!p.where && place && !logging() ? add('in') : ''}
       ${!p.from && !p.to ? add('from') : ''}
       ${!p.to && !logging() && friendList().length ? add('for') : ''}
@@ -2403,12 +2486,12 @@ function sendMode(to) {
 
 // Right after "from", "in" or "for", the people, places and friends you've used before, so names stay spelled one way
 function suggestions(raw) {
-  const m = raw.match(/(?:^|[\s,])(from|in|near|for)\s+([^,;.]*)$/i);
+  const m = raw.match(/(?:^|[\s,])(from|in|near|for|with)\s+([^,;.]*)$/i);
   if (!m) return '';
   const kw = m[1].toLowerCase();
   const typed = m[2].trim().toLowerCase();
   const seen = new Map();
-  if (kw === 'for') for (const f of friendList()) seen.set(f.by.toLowerCase(), { v: f.by, n: 1 });
+  if (kw === 'for' || kw === 'with') for (const f of friendList()) seen.set(f.by.toLowerCase(), { v: f.by, n: 1 });
   else for (const r of all()) {
     for (const v of kw === 'from' ? [r.from] : [hoodOf(r), cityOf(r)]) {
       if (!v) continue;
@@ -2434,7 +2517,7 @@ function insertWord(w) {
 
 function complete(v) {
   const input = $('addInput');
-  input.value = input.value.replace(/((?:^|[\s,])(?:from|in|near|for)\s+)[^,;.]*$/i, (_, a) => a + v);
+  input.value = input.value.replace(/((?:^|[\s,])(?:from|in|near|for|with)\s+)[^,;.]*$/i, (_, a) => a + v);
   caretEnd(input);
 }
 
@@ -2488,8 +2571,10 @@ function save() {
   };
   if (been) rec.beenAt = p.beenAt || now;
   if (p.auto) rec.auto = true;
+  if (p.withs.length) rec.with = withObj(p.withs);
   const id = store.add(rec);
   track('add', p.category);
+  if (rec.with) tellWith({ id, ...rec }, Object.keys(rec.with));
   if (been) track(status, p.category);
 
   done();
@@ -2561,6 +2646,9 @@ function bindEvents() {
     if (e.target.id === 'shareNotes' && shareState) { shareState.notes = e.target.checked; buildShareUrl(); return; }
     if (e.target.dataset.pubKind) { setPublic(e.target.dataset.pubKind, e.target.dataset.pubLabel, e.target.checked); return; }
     if (['dDayD', 'dDayM', 'dDayY'].includes(e.target.id) && detailId) { setWhen(detailId); return; }
+    if (e.target.dataset.ok) { setOk(e.target.dataset.ok, e.target.checked); return; }
+    if (e.target.id === 'showWith' && detailId) { patch(detailId, { showWith: e.target.checked || null }); return; }
+    if (e.target.id === 'withAdd' && detailId && e.target.value) { addWith(detailId, e.target.value); return; }
     if (e.target.id === 'pubNotes') { savePublic({ ...pubCfg, notes: e.target.checked }); return; }
     if (e.target.id === 'pubName') { renamePub(e.target.value); return; }
     const field = e.target.dataset.field;
@@ -2586,11 +2674,12 @@ function bindEvents() {
     if (swiped) { swiped = false; e.preventDefault(); return; }
     if (t.closest('a')) return;
 
-    const el = t.closest('[data-in-save],[data-in-drop],[data-send],[data-friends],[data-unfriend],[data-ideas],[data-vote],[data-idea-send],[data-idea-status],[data-add-friend],[data-pub-manage],[data-insert],[data-complete],[data-pub-share],[data-toggle-city],[data-share-list],[data-share-one],[data-share-go],[data-invite],[data-save],[data-save-all],[data-go-home],[data-cat],[data-open],[data-example],[data-status],[data-status-filter],[data-places],[data-place],[data-unpinned],[data-focus],[data-setcat],[data-delete],[data-close],[data-pick],[data-pickcat],[data-signout]');
+    const el = t.closest('[data-unwith],[data-in-save],[data-in-drop],[data-send],[data-friends],[data-unfriend],[data-ideas],[data-vote],[data-idea-send],[data-idea-status],[data-add-friend],[data-pub-manage],[data-insert],[data-complete],[data-pub-share],[data-toggle-city],[data-share-list],[data-share-one],[data-share-go],[data-invite],[data-save],[data-save-all],[data-go-home],[data-cat],[data-open],[data-example],[data-status],[data-status-filter],[data-places],[data-place],[data-unpinned],[data-focus],[data-setcat],[data-delete],[data-close],[data-pick],[data-pickcat],[data-signout]');
     if (!el) return;
     const d = el.dataset;
 
-    if (d.inSave !== undefined) inboxSave(d.inSave);
+    if (d.unwith !== undefined) removeWith(detailId, d.unwith);
+    else if (d.inSave !== undefined) inboxSave(d.inSave);
     else if (d.inDrop !== undefined) inboxDrop(d.inDrop);
     else if (d.send !== undefined) {
       const f = friendList().find(x => x.name === d.send);

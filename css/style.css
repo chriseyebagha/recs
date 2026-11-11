@@ -1217,3 +1217,19 @@ main {
   .vote, .in-x, .add-btn { transition: none; }
 }
 .status-chip.unset { background: none; border: 1px dashed var(--text-3); color: var(--text-3); font-weight: 500; }
+
+/* Who you went with */
+.with-chips .chip { display: inline-flex; align-items: center; gap: 4px; }
+.with-chips .chip svg { width: 12px; height: 12px; opacity: 0.8; }
+.add-with { position: relative; border: 1px dashed var(--text-3); background: none; color: var(--accent); font-weight: 600; cursor: pointer; }
+.add-with select { position: absolute; inset: 0; opacity: 0; width: 100%; font-size: 16px; cursor: pointer; }
+.hint.inline { margin: 6px 2px 0; }
+.with-show { margin: 10px 0 0; }
+.with-show span { display: flex; flex-direction: column; }
+.with-show small { font-size: 0.78rem; color: var(--text-3); font-weight: 400; }
+.can-show { display: flex; align-items: center; gap: 8px; margin-left: auto; margin-right: 12px; }
+.can-show small { color: var(--text-3); font-size: 0.78rem; }
+.can-show input[type="checkbox"] { appearance: none; -webkit-appearance: none; position: relative; width: 40px; height: 24px; border-radius: 12px; background: var(--surface-2); cursor: pointer; transition: background-color 200ms ease; }
+.can-show input[type="checkbox"]::before { content: ''; position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.2); transition: transform 200ms var(--ease-out); }
+.can-show input[type="checkbox"]:checked { background: var(--accent); }
+.can-show input[type="checkbox"]:checked::before { transform: translateX(16px); }
