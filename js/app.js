@@ -537,7 +537,7 @@ function firebaseStore(db, uid) {
     addIdea(v) { return set(push(ref(db, 'ideas')), v); },
     vote(id, on) { const r = ref(db, `ideas/${id}/votes/${uid}`); return on ? set(r, true) : dbRemove(r); },
     ideaStatus(id, st) { return set(ref(db, `ideas/${id}/status`), st); },
-    isAdmin() { return get(ref(db, `admins/${uid}`)).then(snap => snap.val() === true, () => false); },
+    isAdmin() { return get(ref(db, `admins/${uid}`)).then(snap => { adminSeen = snap.val(); return adminSeen === true; }, () => { adminSeen = 'denied'; return false; }); },
   };
 }
 
@@ -2113,6 +2113,7 @@ let friends = {};   // { daksh: { by: 'Daksh', uid } }
 let inbox = {};     // what friends sent you
 let stats = null;   // usage counts
 let isAdmin = null;  // unknown until the database answers
+let adminSeen = null; // what admins/{uid} held, to explain a no
 
 const friendList = () => Object.entries(friends).map(([name, f]) => ({ name, by: f.by || name, uid: f.uid }))
   .filter(f => f.uid).sort((a, b) => a.by.localeCompare(b.by));
@@ -2452,7 +2453,18 @@ async function renderUsage() {
   const v = $('sharedView');
   v.dataset.key = '';
   if (store && isAdmin === null) { v.innerHTML = ''; return; }  // still asking; drawn again once we know
-  if (!store || !isAdmin) { drawMissing('Nothing here', 'Usage is only for the owner.'); return; }
+  if (!store) { drawMissing('Nothing here', 'Usage is only for the owner.'); return; }
+  if (!isAdmin) {
+    const why = adminSeen === 'denied' ? 'The database rules don\'t include the admins part yet.'
+      : adminSeen === null ? 'There is no admins entry for this account.'
+      : `admins/${store.uid} holds ${JSON.stringify(adminSeen)}, and it needs to be true with no quotes.`;
+    v.innerHTML = `<div class="none"><p>This account isn't set as the owner</p>
+      <p class="sub">${esc(why)} In Firebase, Realtime Database, Data: add <b>admins</b>, then under it this account's ID with the value <b>true</b> (no quotes).</p>
+      <p class="uid">${esc(store.uid)}</p>
+      <button class="btn-primary" data-copy-uid>Copy my account ID</button>
+      <button class="link-btn" data-go-home>Open my Recs</button></div>`;
+    return;
+  }
   const days = Array.from({ length: 30 }, (_, i) => isoDay(Date.now() - (29 - i) * 864e5));
   let data = {};
   try { data = await stats.read(days[0]); } catch { drawMissing('Usage didn\'t load', 'The database rules may need the stats part.'); return; }
@@ -2753,11 +2765,12 @@ function bindEvents() {
     if (swiped) { swiped = false; e.preventDefault(); return; }
     if (t.closest('a')) return;
 
-    const el = t.closest('[data-unsent],[data-unwith],[data-in-save],[data-in-drop],[data-send],[data-friends],[data-unfriend],[data-ideas],[data-vote],[data-idea-send],[data-idea-status],[data-add-friend],[data-pub-manage],[data-insert],[data-complete],[data-pub-share],[data-toggle-city],[data-share-list],[data-share-one],[data-share-go],[data-invite],[data-save],[data-save-all],[data-go-home],[data-cat],[data-open],[data-example],[data-status],[data-status-filter],[data-places],[data-place],[data-unpinned],[data-focus],[data-setcat],[data-delete],[data-close],[data-pick],[data-pickcat],[data-signout]');
+    const el = t.closest('[data-copy-uid],[data-unsent],[data-unwith],[data-in-save],[data-in-drop],[data-send],[data-friends],[data-unfriend],[data-ideas],[data-vote],[data-idea-send],[data-idea-status],[data-add-friend],[data-pub-manage],[data-insert],[data-complete],[data-pub-share],[data-toggle-city],[data-share-list],[data-share-one],[data-share-go],[data-invite],[data-save],[data-save-all],[data-go-home],[data-cat],[data-open],[data-example],[data-status],[data-status-filter],[data-places],[data-place],[data-unpinned],[data-focus],[data-setcat],[data-delete],[data-close],[data-pick],[data-pickcat],[data-signout]');
     if (!el) return;
     const d = el.dataset;
 
-    if (d.unsent !== undefined) store.dropSent(d.unsent);
+    if (d.copyUid !== undefined) navigator.clipboard.writeText(store.uid).then(() => toast('Copied'), () => toast(store.uid));
+    else if (d.unsent !== undefined) store.dropSent(d.unsent);
     else if (d.unwith !== undefined) removeWith(detailId, d.unwith);
     else if (d.inSave !== undefined) inboxSave(d.inSave);
     else if (d.inDrop !== undefined) inboxDrop(d.inDrop);
@@ -2870,7 +2883,11 @@ function start(s, u) {
   store.listenSent(v => { sent = v || {}; if (route().view === 'sent') renderSent(); });
   store.listenFriends(v => { friends = v || {}; if (route().view === 'pub') { $('sharedView').dataset.key = ''; renderPub(); } redrawSheet(); });
   store.listenInbox(v => { inbox = v || {}; takeNotices(); if (route().view === 'home') render(); });
-  store.isAdmin().then(v => { isAdmin = v; if (route().view === 'usage') renderUsage(); });
+  store.isAdmin().then(v => {
+    isAdmin = v;
+    if (route().view === 'usage') renderUsage();
+    if (isOpen() && $('sheet').dataset.view === 'account') openAccount();
+  });
   track('open');
 }
 

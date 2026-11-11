@@ -1224,3 +1224,5 @@ main {
 .add-with select { position: absolute; inset: 0; opacity: 0; width: 100%; font-size: 16px; cursor: pointer; }
 .hint.inline { margin: 6px 2px 0; }
 .link-back { padding: 0; color: var(--accent); }
+.none .uid { font-family: ui-monospace, Menlo, monospace; font-size: 0.85rem; color: var(--text); margin: 14px 0; word-break: break-all; font-weight: 500; }
+.none .btn-primary + .link-btn { margin-top: 10px; }
