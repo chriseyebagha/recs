@@ -502,7 +502,7 @@ function firebaseStore(db, uid) {
 //   "pub": { "$name": {
 //     ".read": true,
 //     ".write": "auth != null && (data.exists() ? data.child('uid').val() === auth.uid : newData.child('uid').val() === auth.uid)",
-//     ".validate": "$name.matches(/^[a-z0-9-]{2,24}$/) && newData.child('uid').val() === auth.uid" } }
+//     ".validate": "$name.matches(/^[a-z0-9][a-z0-9-]+$/) && $name.length <= 24 && newData.child('uid').val() === auth.uid" } }
 function firebasePub(db) {
   return {
     get: name => get(ref(db, `pub/${name}`)).then(s => s.val()),
