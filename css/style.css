@@ -917,7 +917,7 @@ main {
   font-weight: 500;
 }
 
-.toggle input[type="checkbox"] {
+.toggle input[type="checkbox"], .pub-opt input[type="checkbox"] {
   appearance: none;
   -webkit-appearance: none;
   position: relative;
@@ -929,7 +929,7 @@ main {
   transition: background-color 200ms ease;
 }
 
-.toggle input[type="checkbox"]::before {
+.toggle input[type="checkbox"]::before, .pub-opt input[type="checkbox"]::before {
   content: '';
   position: absolute;
   top: 2px;
@@ -942,8 +942,8 @@ main {
   transition: transform 200ms var(--ease-out);
 }
 
-.toggle input[type="checkbox"]:checked { background: var(--accent); }
-.toggle input[type="checkbox"]:checked::before { transform: translateX(18px); }
+.toggle input[type="checkbox"]:checked, .pub-opt input[type="checkbox"]:checked { background: var(--accent); }
+.toggle input[type="checkbox"]:checked::before, .pub-opt input[type="checkbox"]:checked::before { transform: translateX(18px); }
 
 .login-tip { font-size: 0.82rem; color: var(--text-3); line-height: 1.45; margin-top: 16px; }
 
@@ -967,7 +967,7 @@ main {
 .shared .none .btn-primary { margin-top: 20px; max-width: 320px; }
 
 @media (prefers-reduced-motion: reduce) {
-  .toggle input[type="checkbox"]::before, .share-btn { transition: none; }
+  .toggle input[type="checkbox"]::before, .pub-opt input[type="checkbox"]::before, .share-btn { transition: none; }
 }
 
 /* Where: cities fold open to show their neighborhoods */
@@ -1018,7 +1018,7 @@ main {
 
 .pub-card .hint { margin: 0 0 12px; }
 .toggle.bare { background: none; padding: 10px 0; margin: 0; font-weight: 600; }
-.toggle input[type="checkbox"]:disabled { opacity: 0.5; }
+.toggle input[type="checkbox"]:disabled, .pub-opt input[type="checkbox"]:disabled { opacity: 0.5; }
 
 .pub-link {
   display: block;
@@ -1098,3 +1098,16 @@ main {
 
 /* A picture next to a show, video or album on a public page */
 .thumb { width: 44px; height: 44px; border-radius: 8px; object-fit: cover; flex-shrink: 0; align-self: flex-start; background: var(--surface-2); }
+
+/* Public page screen: one switch per city and category */
+.pub-opt { cursor: pointer; padding: 10px 12px 10px 16px; font-weight: 500; }
+.pub-opt-end { display: flex; align-items: center; gap: 10px; }
+.pub-opt input[type="checkbox"] { flex-shrink: 0; }
+.pub-head { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 0; text-align: left; color: var(--text-3); }
+.pub-head span { display: flex; flex-direction: column; min-width: 0; }
+.pub-head b { color: var(--text); font-weight: 600; }
+.pub-head small { font-size: 0.85rem; color: var(--text-2); margin-top: 2px; }
+.pub-card .btn.wide:last-child { margin-bottom: 14px; }
+.link-btn.manage { display: inline-flex; align-items: center; gap: 2px; padding: 0 0 12px; font-size: 0.88rem; }
+.pub-link.first { padding-top: 12px; }
+.hint.err { color: var(--danger); }

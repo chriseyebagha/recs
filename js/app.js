@@ -832,6 +832,7 @@ const openCities = new Set();
 function openPlaces() {
   detailId = null;
   shareState = null;
+  delete $('sheet').dataset.view;
   const { total, cities } = placeOptions();
   if (place.city) openCities.add(place.city);
   const opt = (city, hood, label, count, sub) => {
@@ -876,6 +877,7 @@ function toggleCity(btn) {
 function listSheet(title, recs) {
   detailId = null;
   shareState = null;
+  delete $('sheet').dataset.view;
   $('sheet').innerHTML = `${sheetHead(title)}
     <p class="hint">Open one and put its street address in Where to pin it.</p>
     <div class="list">${recs.map(r => row(r)).join('')}</div>`;
@@ -1129,6 +1131,7 @@ function closeSheet() {
   const wasOpen = isOpen();
   $('sheetWrap').classList.remove('open');
   delete $('sheet').dataset.id;
+  delete $('sheet').dataset.view;
   detailId = null;
   shareState = null;
   document.activeElement?.blur();
@@ -1216,31 +1219,16 @@ function openAccount() {
       <p>${esc(user.email || user.phoneNumber || '')}</p>
       <p class="sub">Everything is saved to this account, so it's on any phone or computer you sign in on.</p>
     </div>
-    ${publicSection()}
+    <div class="list opts"><button class="opt" data-pub-manage>
+      <span class="opt-name">Public page</span><span class="opt-count">${pubCfg.name ? esc(listJoin(pubLabels()) || 'Nothing on it') : 'Off'} ${ICON.chevron}</span>
+    </button></div>
     <div class="account-actions">
       <button class="btn sec wide" data-invite>Invite a friend</button>
       <button class="btn sec wide" data-signout>Sign out</button>
     </div>`;
   delete $('sheet').dataset.id;
+  $('sheet').dataset.view = 'account';
   openSheet();
-}
-
-// Your public page: its link, which cities are on it, notes, and the name in the link
-function publicSection() {
-  const cities = pubLabels();
-  if (!pubCfg.name) {
-    return `<h3 class="sheet-sub">Public page</h3>
-      <p class="hint">Show friends what you loved: the places in a city, or your books, shows and more. Open a category or pick a city in Where, tap Share, and turn on its public page.</p>`;
-  }
-  const url = pubUrl(pubCfg.name);
-  return `<h3 class="sheet-sub">Public page</h3>
-    <div class="pub-card">
-      <a class="pub-link" href="${esc(url)}">${esc(prettyUrl(url))}</a>
-      <button class="btn wide" data-pub-share="">Share my page</button>
-      <p class="hint">${cities.length ? `${esc(listJoin(cities))} ${cities.length === 1 ? 'is' : 'are'} on it.` : 'No cities on it right now.'} To add or remove one, open the category or pick the city in Where, then tap Share.</p>
-    </div>
-    <label class="toggle"><span>Show my notes</span><input type="checkbox" id="pubNotes" ${pubCfg.notes !== false ? 'checked' : ''} /></label>
-    <label class="field"><span>Name in the link</span><input id="pubName" value="${esc(pubCfg.name)}" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done" /></label>`;
 }
 
 // Pull the sheet down to close it: it follows the finger, and a quick flick is enough
@@ -1357,17 +1345,27 @@ function drawShareSheet() {
   const s = shareState;
   const n = s.recs.length;
   const names = s.recs.slice(0, 4).map(r => r.name).join(', ') + (n > 4 ? ` and ${n - 4} more` : '');
-  $('sheet').innerHTML = `${sheetHead(s.page ? `Share ${s.page.label}` : n === 1 ? 'Share' : `Share ${n}`)}
-    ${s.page ? publicCard(s.page) + `<h3 class="sheet-sub">Or send ${n === 1 ? 'this one' : `these ${n}`} as a list</h3>` : ''}
+  const one = n === 1 && s.title === s.recs[0].name;
+  $('sheet').innerHTML = `${sheetHead(one ? 'Share' : s.page ? `Share ${s.page.label}` : `Share ${n}`)}
+    ${s.page ? publicCard(s.page) : publicIntro()}
+    <h3 class="sheet-sub">Or send ${n === 1 ? 'just this' : `these ${n}`} as a list</h3>
     <label class="field"><span>Title</span><input id="shareTitle" value="${esc(s.title)}" /></label>
-    <p class="hint">${esc(names)}</p>
+    ${one ? '' : `<p class="hint">${esc(names)}</p>`}
     <label class="toggle"><span>Include my notes</span><input type="checkbox" id="shareNotes" ${s.notes ? 'checked' : ''} /></label>
-    <button class="btn wide ${s.page ? 'sec' : ''}" data-share-go>Share list</button>
+    <button class="btn wide sec" data-share-go>Share list</button>
     <p class="hint">Whoever opens the link sees ${n === 1 ? 'this' : 'these'} and can save ${n === 1 ? 'it' : 'any of them'} to their own Recs. Nothing else of yours is visible.</p>`;
   delete $('sheet').dataset.id;
+  $('sheet').dataset.view = 'share';
 }
 
-const redrawShare = () => { if (shareState && isOpen() && !$('sheet').dataset.id) drawShareSheet(); };
+// Sheets that show public page state redraw when it changes
+function redrawSheet() {
+  if (!isOpen() || $('sheet').dataset.id) return;
+  const v = $('sheet').dataset.view;
+  if (v === 'share' && shareState) drawShareSheet();
+  else if (v === 'public') drawPublic();
+}
+
 
 // Built ahead of the tap, because iOS only lets a page open the share sheet straight from a tap
 async function buildShareUrl() {
@@ -1446,7 +1444,7 @@ function syncPub() {
     const json = JSON.stringify(body);
     if (json === pubLast) return;
     try { await pub.set(pubCfg.name, { ...body, updatedAt: Date.now() }); pubLast = json; }
-    catch { pubErr = 'setup'; redrawShare(); }
+    catch { pubErr = 'setup'; redrawSheet(); }
   }, 1000);
 }
 
@@ -1485,35 +1483,35 @@ async function setPublic(kind, label, on) {
   let name = pubCfg.name;
   if (on && !name) {
     pubBusy = true;
-    redrawShare();
+    redrawSheet();
     name = await claimName(firstName());
     pubBusy = false;
-    if (!name) { redrawShare(); return; }
+    if (!name) { redrawSheet(); return; }
   }
   savePublic({ ...pubCfg, name, [k]: list });
-  redrawShare();
+  redrawSheet();
 }
 
 async function renamePub(want) {
   const old = pubCfg.name;
   const name = slug(want).slice(0, 24);
-  if (!name || name === old) { openAccount(); return; }
-  if (name.length < 2) { toast('Use at least two letters'); openAccount(); return; }
+  if (!name || name === old) { drawPublic(); return; }
+  if (name.length < 2) { toast('Use at least two letters'); drawPublic(); return; }
   try {
     const cur = await pub.get(name);
-    if (cur && cur.uid !== store.uid) { toast(`Someone already has ${name}`); openAccount(); return; }
+    if (cur && cur.uid !== store.uid) { toast(`Someone already has ${name}`); drawPublic(); return; }
     pubCfg = { ...pubCfg, name };
     await pub.set(name, { ...buildPub(), updatedAt: Date.now() });
   } catch {
     pubCfg = { ...pubCfg, name: old };
     toast('That name could not be saved');
-    openAccount();
+    drawPublic();
     return;
   }
   if (old) pub.remove(old).catch(() => {});
   pubLast = '';
   savePublic(pubCfg);
-  openAccount();
+  drawPublic();
   toast('Link changed. The old one stops working.');
 }
 
@@ -1541,11 +1539,74 @@ function publicCard({ kind, label }) {
     taken: 'Every name like yours is taken. Try again later.',
   }[pubErr];
   return `<div class="pub-card">
-    <label class="toggle bare"><span>Public page</span><input type="checkbox" data-pub-kind="${kind}" data-pub-label="${esc(label)}" ${on ? 'checked' : ''} ${pubBusy ? 'disabled' : ''} /></label>
+    <label class="toggle bare"><span>${esc(label)} on your public page</span><input type="checkbox" data-pub-kind="${kind}" data-pub-label="${esc(label)}" ${on ? 'checked' : ''} ${pubBusy ? 'disabled' : ''} /></label>
     ${on ? `<a class="pub-link" href="${esc(url)}">${esc(prettyUrl(url))}</a>
       <button class="btn wide" data-pub-share="${esc(slug(label))}">Share page</button>` : ''}
     <p class="hint">${err ? esc(err) : what}</p>
+    <button class="link-btn manage" data-pub-manage>Everything on your page ${ICON.chevron}</button>
   </div>`;
+}
+
+// The page an item belongs on: its city for a place, its category for a book or show. Only once tried or loved.
+function pageOf(r) {
+  if (r.status === 'todo') return null;
+  if (TRIP_CATS.includes(r.category) && cityOf(r)) return { kind: 'trip', label: cityOf(r) };
+  if (SHELF_CATS.includes(r.category)) return { kind: 'shelf', label: r.category };
+  return null;
+}
+
+// Share sheet top when there's no one city or category: what a public page is, and the way in
+function publicIntro() {
+  const url = pubCfg.name ? pubUrl(pubCfg.name) : '';
+  const on = pubLabels();
+  return `<div class="pub-card">
+    <button class="pub-head" data-pub-manage>
+      <span><b>Your public page</b><small>${on.length && url ? esc(listJoin(on)) : 'Show friends what you loved, by city or by category'}</small></span>
+      ${ICON.chevron}
+    </button>
+    ${on.length && url ? `<button class="btn wide" data-pub-share="">Share my page</button>` : ''}
+  </div>`;
+}
+
+// ── The Public page screen: everything that's on it, in one place ──
+function openPublic() {
+  detailId = null;
+  pubErr = '';
+  drawPublic();
+  openSheet();
+}
+
+function drawPublic() {
+  const done = all().filter(r => r.status !== 'todo');
+  const cities = {};
+  for (const r of done) if (TRIP_CATS.includes(r.category) && cityOf(r)) cities[cityOf(r)] = (cities[cityOf(r)] || 0) + 1;
+  for (const c of Object.values(pubCfg.cities || {})) cities[c] ??= 0;
+  const shelves = {};
+  for (const r of done) if (SHELF_CATS.includes(r.category)) shelves[r.category] = (shelves[r.category] || 0) + 1;
+  for (const c of Object.values(pubCfg.shelves || {})) shelves[c] ??= 0;
+  const row = (kind, label, n) => `<label class="opt pub-opt">
+      <span class="opt-name">${esc(label)}</span>
+      <span class="pub-opt-end"><span class="opt-count">${n ? kind === 'trip' ? count(n, '') : count(n, label) : 'none yet'}</span>
+      <input type="checkbox" data-pub-kind="${kind}" data-pub-label="${esc(label)}" ${isPublic(kind, label) && pubCfg.name ? 'checked' : ''} ${pubBusy ? 'disabled' : ''} /></span>
+    </label>`;
+  const group = (title, kind, obj, order) => {
+    const keys = Object.keys(obj).sort(order);
+    return keys.length ? `<h3 class="sheet-sub">${title}</h3><div class="list opts toggles">${keys.map(k => row(kind, k, obj[k])).join('')}</div>` : '';
+  };
+  const url = pubCfg.name ? pubUrl(pubCfg.name) : '';
+  const err = { setup: 'Public pages need one change in the Firebase database rules first.', taken: 'Every name like yours is taken. Try again later.' }[pubErr];
+  $('sheet').innerHTML = `${sheetHead('Public page')}
+    <p class="hint">Friends see what you tried or loved in the cities and categories you turn on, with your notes if you like. It updates as you go. Who recommended things stays private.</p>
+    ${err ? `<p class="hint err">${esc(err)}</p>` : ''}
+    ${url && pubLabels().length ? `<div class="pub-card"><a class="pub-link first" href="${esc(url)}">${esc(prettyUrl(url))}</a><button class="btn wide" data-pub-share="">Share my page</button></div>` : ''}
+    ${group('Places', 'trip', cities, (a, b) => cities[b] - cities[a] || a.localeCompare(b))}
+    ${group('Things', 'shelf', shelves, (a, b) => SHELF_CATS.indexOf(a) - SHELF_CATS.indexOf(b))}
+    ${Object.keys(cities).length + Object.keys(shelves).length ? '' : '<p class="hint">Mark things as Tried or Loved, and the cities and categories they belong to show up here.</p>'}
+    ${pubCfg.name ? `<h3 class="sheet-sub">Settings</h3>
+      <label class="toggle"><span>Show my notes</span><input type="checkbox" id="pubNotes" ${pubCfg.notes !== false ? 'checked' : ''} /></label>
+      <label class="field"><span>Name in the link</span><input id="pubName" value="${esc(pubCfg.name)}" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done" /></label>` : ''}`;
+  delete $('sheet').dataset.id;
+  $('sheet').dataset.view = 'public';
 }
 
 // ── Opening a public page ──
@@ -2041,7 +2102,7 @@ function bindEvents() {
     const t = e.target;
     if (t.closest('a')) return;
 
-    const el = t.closest('[data-insert],[data-complete],[data-pub-share],[data-toggle-city],[data-share-list],[data-share-one],[data-share-go],[data-invite],[data-save],[data-save-all],[data-go-home],[data-cat],[data-open],[data-example],[data-status],[data-status-filter],[data-places],[data-place],[data-unpinned],[data-focus],[data-setcat],[data-delete],[data-close],[data-pick],[data-pickcat],[data-signout]');
+    const el = t.closest('[data-pub-manage],[data-insert],[data-complete],[data-pub-share],[data-toggle-city],[data-share-list],[data-share-one],[data-share-go],[data-invite],[data-save],[data-save-all],[data-go-home],[data-cat],[data-open],[data-example],[data-status],[data-status-filter],[data-places],[data-place],[data-unpinned],[data-focus],[data-setcat],[data-delete],[data-close],[data-pick],[data-pickcat],[data-signout]');
     if (!el) return;
     const d = el.dataset;
 
@@ -2056,7 +2117,8 @@ function bindEvents() {
         : place.city ? { kind: 'trip', label: place.city } : null;
       openShare(recs, listTitle(recs), page);
     }
-    else if (d.shareOne !== undefined) { const r = { id: detailId, ...items[detailId] }; openShare([r], r.name); }
+    else if (d.shareOne !== undefined) { const r = { id: detailId, ...items[detailId] }; openShare([r], r.name, pageOf(r)); }
+    else if (d.pubManage !== undefined) openPublic();
     else if (d.shareGo !== undefined) doShare();
     else if (d.invite !== undefined) invite();
     else if (d.save !== undefined) wantSave(Number(d.save));
@@ -2124,7 +2186,7 @@ function start(s, u) {
   store.listenPublic(v => {
     pubCfg = v || {};
     syncPub();
-    redrawShare();
+    redrawSheet();
   });
 }
 
