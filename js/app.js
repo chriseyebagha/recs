@@ -564,7 +564,6 @@ function demoStats() {
 function firebasePub(db) {
   return {
     get: name => get(ref(db, `pub/${name}`)).then(s => s.val()),
-    ok: (name, uid) => get(ref(db, `pub/${name}/ok/${uid}`)).then(s => s.val() === true),
     set: (name, v) => set(ref(db, `pub/${name}`), v),
     remove: name => dbRemove(ref(db, `pub/${name}`)),
   };
@@ -576,7 +575,6 @@ function demoPub() {
   const write = d => { try { localStorage.setItem('recs-demo-pub', JSON.stringify(d)); } catch {} };
   return {
     get: async name => read()[name] || null,
-    ok: async (name, uid) => read()[name]?.ok?.[uid] === true,
     set: async (name, v) => { const d = read(); d[name] = v; write(d); },
     remove: async name => { const d = read(); delete d[name]; write(d); },
   };
@@ -1616,11 +1614,10 @@ function buildPub() {
   const notes = pubCfg.notes !== false;
   const enc = r => [r.name, r.category, isPlace(r) ? hoodOf(r) || '' : '', notes ? r.note || '' : '', r.status,
     webUrl(r.link), r.lat ? r5(r.lat) : 0, r.lng ? r5(r.lng) : 0, toDay(beenTime(r)), webUrl(r.image),
-    r.showWith && r.with ? Object.entries(r.with).filter(([k]) => !k.startsWith('p-')).map(([k, w]) => [k, w.by]) : []];
+    Object.entries(r.with || {}).map(([k, w]) => [k, w.by])];
   const pages = kind => Object.fromEntries(Object.entries(pubCfg[cfgKey(kind)] || {}).map(([key, label]) =>
     [key, { c: label, i: pageRecs(kind, label).sort(byRecent).slice(0, 300).map(enc) }]));
-  // ok: the friends you've let show you were there with them
-  return { uid: store.uid, by: firstName(), trips: pages('trip'), shelves: pages('shelf'), ok: pubCfg.ok || {} };
+  return { uid: store.uid, by: firstName(), trips: pages('trip'), shelves: pages('shelf') };
 }
 
 // Republish a moment after anything changes; only when the page would look different
@@ -1836,10 +1833,6 @@ async function renderPub() {
       key, at: data.updatedAt, by, name, title: label, page: t ? 'trip' : 'shelf', city: t ? label : '', cat: t ? '' : label,
       recs: (Array.isArray(page.i) ? page.i : []).map(decodeRec).filter(x => x.name),
     };
-    // A companion shows only if they've said yes to this person; asked live, so a no takes effect at once
-    const names = [...new Set(shared.recs.flatMap(x => x.with.map(w => w[0])))];
-    const yes = await Promise.all(names.map(h => pub.ok(h, data.uid).catch(() => false)));
-    shared.okWith = new Set(names.filter((_, i) => yes[i]));
   }
   drawShared();
   flushPending();
@@ -2021,7 +2014,7 @@ function drawShared() {
   const row = (r, i) => {
     // On a trip page the section says loved or tried; on a list it's said in words
     const did = !onPage && { loved: `${by} loved it`, tried: `${by} tried it` }[r.status];
-    const went = (r.with || []).filter(([h]) => s.okWith?.has(h)).map(w => w[1]);
+    const went = (r.with || []).map(w => w[1]);
     const meta = [mixed && r.category, hoodOf(r) || (ADDRESS.test(r.where || '') ? cityOf(r) : r.where), did, went.length && 'with ' + listJoin(went)].filter(Boolean).join(' · ');
     const act = action(r);
     const saved = signedIn && isSaved(r);
@@ -2202,11 +2195,7 @@ function inboxSave(id) {
   delete inbox[id];
   render();
   track('inbox_save', rec.category);
-  // Asked once per friend: may they show you were there?
-  if (x.kind === 'with' && x.fromUid && pubCfg.ok?.[x.fromUid] === undefined) {
-    toast(`Added. Let ${x.from} show you were there on their page?`, () => setOk(x.fromUid, true), 'Allow');
-    savePublic({ ...pubCfg, ok: { ...(pubCfg.ok || {}), [x.fromUid]: false } });
-  } else toast(`Saved ${rec.name}`);
+  toast(x.kind === 'with' ? `Added ${rec.name} to what you tried` : `Saved ${rec.name}`);
 }
 
 function inboxDrop(id) {
@@ -2245,7 +2234,6 @@ function drawFriends() {
     ${fs.length ? `<h3 class="sheet-sub">${fs.length} ${fs.length === 1 ? 'friend' : 'friends'}</h3>
       <div class="list opts">${fs.map(f => `<div class="opt friend-opt">
         <a class="opt-name" href="#/@${esc(f.name)}">${esc(f.by)} <small>@${esc(f.name)}</small></a>
-        <label class="can-show" title="Can show you were there on their page"><small>Show me</small><input type="checkbox" data-ok="${esc(f.uid)}" ${pubCfg.ok?.[f.uid] ? 'checked' : ''} /></label>
         <button class="link-btn danger" data-unfriend="${esc(f.name)}">Remove</button>
       </div>`).join('')}</div>` : ''}`;
   delete $('sheet').dataset.id;
@@ -2253,8 +2241,8 @@ function drawFriends() {
 }
 
 // ── Who you went with ──
-// Private by default. A tagged friend gets "went with you" and can add it to their own list in one tap.
-// On a public page a companion shows only when both say yes: you per place (showWith), they once per friend (pub ok).
+// Yours to add and remove. A tagged friend gets "went with you" and can add it to their own list in one tap;
+// their copy is theirs. On your public page, whoever you tagged shows with the place.
 const withObj = list => Object.fromEntries(list.map(w => w.name ? [w.name, { by: w.by, uid: w.uid }] : ['p-' + slug(w.by), { by: w.by }]));
 
 function tellWith(r, keys) {
@@ -2271,13 +2259,11 @@ function tellWith(r, keys) {
 function withRow(r) {
   const tagged = Object.entries(r.with || {});
   const more = friendList().filter(f => !r.with?.[f.name]);
-  const anyFriend = tagged.some(([k]) => !k.startsWith('p-'));
   return `<span>With</span>
     <div class="chips with-chips">
       ${tagged.map(([k, w]) => `<button class="chip on" data-unwith="${esc(k)}" aria-label="Remove ${esc(w.by)}">${esc(w.by)} ${ICON.x}</button>`).join('')}
       ${more.length ? `<label class="chip add-with">+ friend<select id="withAdd" aria-label="Add who you went with"><option value=""></option>${more.map(f => `<option value="${esc(f.name)}">${esc(f.by)}</option>`).join('')}</select></label>` : tagged.length ? '' : '<span class="hint inline">Type "with Monica" when you add a place.</span>'}
-    </div>
-    ${anyFriend ? `<label class="toggle with-show"><span>Show them on my public page<small>Only friends who've said yes</small></span><input type="checkbox" id="showWith" ${r.showWith ? 'checked' : ''} /></label>` : ''}`;
+    </div>`;
 }
 
 function addWith(id, name) {
@@ -2292,14 +2278,10 @@ function removeWith(id, key) {
   const w = { ...(items[id]?.with || {}) };
   const by = w[key]?.by;
   delete w[key];
-  patch(id, { with: Object.keys(w).length ? w : null, ...(Object.keys(w).length ? {} : { showWith: null }) });
+  patch(id, { with: Object.keys(w).length ? w : null });
   toast(`Removed ${by}`);
 }
 
-function setOk(uid, on) {
-  savePublic({ ...pubCfg, ok: { ...(pubCfg.ok || {}), [uid]: on } });
-  pubLast = '';
-}
 
 // ── Ideas: anyone can suggest one, everyone votes, the owner marks what's planned and done ──
 let ideas = {};
@@ -2646,8 +2628,6 @@ function bindEvents() {
     if (e.target.id === 'shareNotes' && shareState) { shareState.notes = e.target.checked; buildShareUrl(); return; }
     if (e.target.dataset.pubKind) { setPublic(e.target.dataset.pubKind, e.target.dataset.pubLabel, e.target.checked); return; }
     if (['dDayD', 'dDayM', 'dDayY'].includes(e.target.id) && detailId) { setWhen(detailId); return; }
-    if (e.target.dataset.ok) { setOk(e.target.dataset.ok, e.target.checked); return; }
-    if (e.target.id === 'showWith' && detailId) { patch(detailId, { showWith: e.target.checked || null }); return; }
     if (e.target.id === 'withAdd' && detailId && e.target.value) { addWith(detailId, e.target.value); return; }
     if (e.target.id === 'pubNotes') { savePublic({ ...pubCfg, notes: e.target.checked }); return; }
     if (e.target.id === 'pubName') { renamePub(e.target.value); return; }
