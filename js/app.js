@@ -2492,17 +2492,22 @@ async function renderUsage() {
   try { data = await stats.read(days[0]); } catch { drawMissing('Usage didn\'t load', 'The database rules may need the stats part.'); return; }
   if (route().view !== 'usage') return;
   const last = days.slice(-7), prev = days.slice(-14, -7);
-  const tile = (label, cur, before) => {
+  const tile = (label, cur, before, than) => {
     const d = cur - before;
     return `<div class="kpi"><span class="kpi-label">${label}</span><span class="kpi-num">${cur}</span>
-      <span class="kpi-was">${d === 0 ? 'same as' : d > 0 ? `up ${d} from` : `down ${-d} from`} ${before} the week before</span></div>`;
+      <span class="kpi-was">${d === 0 ? 'same as' : d > 0 ? `up ${d} from` : `down ${-d} from`} ${before} ${than}</span></div>`;
+  };
+  // The same six counts for any stretch of days, against the stretch before it
+  const tilesFor = (now, was, than) => {
+    const both = keys => [now, was].map(ds => keys.reduce((n, k) => n + SUM(ds, data, k), 0));
+    return [
+      ['People', PEOPLE(now, data), PEOPLE(was, data)], ['Added', ...both(['add'])], ['Tried or loved', ...both(['tried', 'loved'])],
+      ['Shared', ...both(['share_list', 'share_page', 'send'])], ['Page views', ...both(['page_view'])], ['Saved from friends', ...both(['inbox_save', 'page_save'])],
+    ].map(t => tile(...t, than)).join('');
   };
   const sumBoth = keys => [last, prev].map(ds => keys.reduce((n, k) => n + SUM(ds, data, k), 0));
-  const [aNow, aWas] = [PEOPLE(last, data), PEOPLE(prev, data)];
-  const tiles = [
-    ['People', aNow, aWas], ['Added', ...sumBoth(['add'])], ['Tried or loved', ...sumBoth(['tried', 'loved'])],
-    ['Shared', ...sumBoth(['share_list', 'share_page', 'send'])], ['Page views', ...sumBoth(['page_view'])], ['Saved from friends', ...sumBoth(['inbox_save', 'page_save'])],
-  ].map(t => tile(...t)).join('');
+  const todayTiles = tilesFor(days.slice(-1), days.slice(-2, -1), 'yesterday');
+  const tiles = tilesFor(last, prev, 'the week before');
   const daily = days.map(d => PEOPLE([d], data));
   const top = Math.max(1, ...daily);
   const fmt = d => new Date(d + 'T12:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
@@ -2517,9 +2522,12 @@ async function renderUsage() {
     <header class="shared-head">
       <p class="eyebrow">Recs${DEMO ? ' · sample, this browser only' : ''}</p>
       <h1>Usage</h1>
-      <p class="trip-sub">Last 7 days, against the 7 before. ${PEOPLE(days, data)} ${PEOPLE(days, data) === 1 ? 'person' : 'people'} in 30 days.</p>
+      <p class="trip-sub">${PEOPLE(days, data)} ${PEOPLE(days, data) === 1 ? 'person' : 'people'} in 30 days.</p>
     </header>
     ${anyData ? '' : '<p class="hint">No counts yet. They start as people use this version of the app.</p>'}
+    <h2 class="pub-h">Today</h2>
+    <div class="kpis">${todayTiles}</div>
+    <h2 class="pub-h">Last 7 days</h2>
     <div class="kpis">${tiles}</div>
     <h2 class="pub-h">People each day</h2>
     <div class="chart">
