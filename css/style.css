@@ -550,18 +550,6 @@ main {
   font-size: 0.82rem;
 }
 
-.pv-status {
-  flex-shrink: 0;
-  font-size: 0.78rem;
-  font-weight: 600;
-  color: var(--text-2);
-  background: var(--surface-2);
-  height: 24px;
-  line-height: 24px;
-  padding: 0 9px;
-  border-radius: 12px;
-}
-
 
 .picker { padding: 0 0 10px; max-height: 40dvh; overflow-y: auto; }
 .picker.chips { display: flex; }
@@ -1226,3 +1214,82 @@ main {
 .link-back { padding: 0; color: var(--accent); }
 .none .uid { font-family: ui-monospace, Menlo, monospace; font-size: 0.85rem; color: var(--text); margin: 14px 0; word-break: break-all; font-weight: 500; }
 .none .btn-primary + .link-btn { margin-top: 10px; }
+
+/* ── The short tour, and How it works ── */
+.tour {
+  position: fixed;
+  inset: 0;
+  z-index: 1500;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  padding: calc(8px + var(--safe-t)) 0 calc(24px + var(--safe-b));
+}
+.tour-skip { align-self: flex-end; padding: 10px 24px; color: var(--text-2); }
+.tour-track {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+}
+.tour-track::-webkit-scrollbar { display: none; }
+.tour-card {
+  flex: 0 0 100%;
+  scroll-snap-align: center;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0 max(24px, calc(50% - 190px)) 24px;
+  overflow-y: auto;
+}
+.tour-art { display: flex; flex-direction: column; justify-content: flex-end; gap: 10px; min-height: 172px; margin-bottom: 32px; pointer-events: none; }
+.tour-card h2 { font-size: 1.6rem; font-weight: 700; letter-spacing: -0.025em; line-height: 1.15; margin-bottom: 10px; }
+.tour-card p { color: var(--text-2); font-size: 1rem; line-height: 1.5; }
+.tour-input {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 46px;
+  padding: 0 6px 0 16px;
+  border-radius: 23px;
+  background: var(--surface);
+  border: 1px solid var(--accent);
+}
+.tour-input .add-btn { width: 34px; height: 34px; }
+.tour-input .add-btn svg { width: 16px; height: 16px; }
+.tour-pills { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 0.85rem; }
+.tour-pills .pv-name { max-width: none; }
+.tour-foot { width: 100%; max-width: 428px; margin: 0 auto; padding: 0 24px; }
+.tour-dots { display: flex; justify-content: center; gap: 7px; margin-bottom: 20px; }
+.tour-dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--text-3); opacity: 0.5; transition: background-color 200ms ease; }
+.tour-dots i.on { background: var(--text); opacity: 1; }
+.login-card .login-links { display: flex; justify-content: center; flex-wrap: wrap; gap: 4px 20px; margin: 14px 0 0; }
+.login-links .link-btn { padding: 8px 0; text-decoration: none; }
+
+.guide { margin: 0 4px 20px; }
+.guide h3 { display: flex; align-items: center; gap: 8px; font-size: 1rem; font-weight: 700; letter-spacing: -0.01em; margin-bottom: 4px; }
+.guide p { font-size: 0.92rem; color: var(--text-2); line-height: 1.5; }
+.guide-n { width: 20px; height: 20px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-size: 0.75rem; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.words { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 8px 12px; margin-top: 10px; font-size: 0.88rem; color: var(--text-2); }
+.words .pv-part { justify-self: start; }
+
+/* Said once, until the first swipe */
+.tip { display: flex; align-items: center; gap: 8px; margin: 0 4px 16px; font-size: 0.85rem; color: var(--text-2); line-height: 1.4; }
+.tip span { flex: 1; }
+.tip button { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; color: var(--text-3); flex-shrink: 0; }
+
+/* Detail: the category is a button; its choices open under it */
+.cat-btn { display: inline-flex; align-items: center; gap: 4px; padding: 6px 0; }
+.cat-chips { margin: 2px 0 14px; }
+
+/* Share sheet: the link is the main thing; the public page sits under it */
+.btn.sec.tint { background: var(--accent-soft); color: var(--accent); }
+
+/* Friends: add by @name */
+.name-add { display: flex; gap: 8px; }
+.name-add .btn { flex: none; height: auto; min-height: 44px; padding: 0 20px; }
+.tip .link-btn { padding: 0; font-size: inherit; text-decoration: none; flex-shrink: 0; }

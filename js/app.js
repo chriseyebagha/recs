@@ -15,6 +15,8 @@ const firebaseConfig = {
 
 // ?demo runs on sample data in this browser only, with no sign-in
 const DEMO = new URLSearchParams(location.search).has('demo');
+// ?tour shows the first-run tour again, to look at it
+const TOUR = new URLSearchParams(location.search).has('tour');
 
 // ── Categories ──
 // action decides the one button each row gets
@@ -22,22 +24,17 @@ const CATEGORIES = [
   // Places: these get a map, and go on a city's public page
   { id: 'Restaurants', action: 'map', words: ['restaurant','pasta','pizza','pizzeria','sushi','ramen','pho','noodle','noodles','taco','tacos','taqueria','brunch','dinner','lunch','breakfast','bbq','burger','burgers','steak','steakhouse','seafood','oyster','oysters','chicken','wings','halal','dim sum','dumplings','omakase','izakaya','tapas','trattoria','osteria','bistro','brasserie','diner','eatery','kitchen','grill','supper club','thai','indian','italian','mexican','korean','korean bbq','chinese','japanese','vietnamese','french','greek','mediterranean','ethiopian','nigerian','ghanaian','jamaican','caribbean','african','vegan','food','bakery','bagel','bagels','deli','sandwich','sandwiches','suya','jollof spot','dessert','ice cream','gelato','donut','donuts','patisserie','pastry'] },
   { id: 'Bars & Cafes', action: 'map', words: ['bar','cocktail','cocktails','wine bar','natural wine','pub','tavern','lounge','brewery','beer garden','coffee','cafe','café','espresso','matcha','tea','boba','juice','speakeasy','rooftop','jazz club','nightclub','club','karaoke'] },
-  { id: 'Hotels', action: 'map', words: ['hotel','hotels','airbnb','resort','hostel','motel','guesthouse','guest house','b&b','bnb','villa','boutique hotel'] },
-  { id: 'Shops', action: 'map', words: ['shop','store','boutique','vintage','vintage store','thrift','thrift store','bookstore','bookshop','record store','flea market','florist','concept store'] },
-  { id: 'Places & Travel', action: 'map', words: ['trip','travel','beach','park','museum','hike','island','gallery','vacation','market','theater','theatre','cinema','venue','viewpoint','garden','day trip'] },
+  { id: 'Places & Travel', action: 'map', words: ['trip','travel','beach','park','museum','hike','island','gallery','vacation','market','theater','theatre','cinema','venue','viewpoint','garden','day trip','hotel','hotels','airbnb','resort','hostel','motel','guesthouse','guest house','b&b','bnb','villa','boutique hotel','shop','store','boutique','vintage','vintage store','thrift','thrift store','bookstore','bookshop','record store','flea market','florist','concept store'] },
   // Things: these go on their own public page, like a shelf
   { id: 'Movies', action: 'watch', words: ['movie','movies','film','films','documentary','trilogy','a24','criterion'] },
   { id: 'TV Shows', action: 'watch', words: ['show','shows','tv show','tv series','series','tv','season','miniseries','limited series','sitcom','anime','docuseries','k-drama','kdrama','netflix','hbo','hulu','prime video','apple tv','disney+'] },
-  { id: 'Videos', action: 'video', words: ['youtube','youtube video','video','videos','ted talk','tiktok','vlog','youtuber','channel'] },
   { id: 'Books', action: 'search', words: ['book','books','novel','memoir','author','audiobook','kindle','short story'] },
-  { id: 'Articles', action: 'search', words: ['article','articles','essay','newsletter','substack','blog','blog post','op-ed','longread','long read'] },
-  { id: 'Podcasts', action: 'podcast', words: ['podcast','podcasts','episode','pod'] },
-  { id: 'Music', action: 'listen', words: ['album','song','songs','artist','band','playlist','ep','track','spotify','rapper','singer','dj','mixtape'] },
+  { id: 'Articles & Videos', action: 'search', words: ['article','articles','essay','newsletter','substack','blog','blog post','op-ed','longread','long read','youtube','youtube video','video','videos','ted talk','tiktok','vlog','youtuber','channel'] },
+  { id: 'Music & Podcasts', action: 'listen', words: ['album','song','songs','artist','band','playlist','ep','track','spotify','rapper','singer','dj','mixtape','podcast','podcasts','episode','pod'] },
   { id: 'Games', action: 'search', words: ['game','games','video game','board game','boardgame','ps5','xbox','nintendo','switch game','steam'] },
   { id: 'Events', action: 'search', words: ['concert','gig','festival','exhibition','exhibit','musical','broadway','comedy show','stand-up','standup','opera','ballet','tickets'] },
   { id: 'Recipes', action: 'search', words: ['recipe','recipes','stew','soup','sauce','marinade','jollof','how to cook','how to make'] },
-  { id: 'Apps', action: 'search', words: ['app','apps','app store','ios app','android app','chrome extension','extension','software'] },
-  { id: 'Products', action: 'search', words: ['buy','product','gadget','shoes','sneakers','jacket','headphones','skincare','cologne','perfume','moisturizer'] },
+  { id: 'Apps & Products', action: 'search', words: ['buy','product','gadget','shoes','sneakers','jacket','headphones','skincare','cologne','perfume','moisturizer','app','apps','app store','ios app','android app','chrome extension','extension','software'] },
   { id: 'Courses & Certs', action: 'search', words: ['course','class','certification','cert','certificate','exam','bootcamp','workshop','training','udemy','coursera'] },
   // Private: never on a public page
   { id: 'Services', action: 'map', words: ['barber','barbershop','haircut','salon','dentist','doctor','therapist','mechanic','tailor','plumber','trainer','physio','dermatologist','nails','spa','massage','gym','cleaner','stylist','tattoo'] },
@@ -49,25 +46,28 @@ const isPlace = r => CAT[r.category]?.action === 'map';
 // Movies & TV became two categories; saves from before, and old shared links, are read as one of them
 const TV_WORDS = /\b(shows?|series|seasons?|episodes?|tv|hbo|sitcom|anime|miniseries|docuseries|netflix|hulu)\b/i;
 const splitMoviesTv = r => TV_WORDS.test(`${r.name} ${r.note || ''} ${r.link || ''}`) ? 'TV Shows' : 'Movies';
-const knownCat = (c, r) => c === 'Movies & TV' ? splitMoviesTv(r) : CAT[c] ? c : 'Other';
+// Look-alike categories were merged; saves, shared links and public pages from before are read as the new one
+const MERGED = { Hotels: 'Places & Travel', Shops: 'Places & Travel', Music: 'Music & Podcasts', Podcasts: 'Music & Podcasts',
+  Articles: 'Articles & Videos', Videos: 'Articles & Videos', Apps: 'Apps & Products', Products: 'Apps & Products' };
+const knownCat = (c, r) => c === 'Movies & TV' ? splitMoviesTv(r) : MERGED[c] || (CAT[c] ? c : 'Other');
 
 const DOMAINS = [
-  [/spotify\.com\/(show|episode)|podcasts\.apple|overcast\.fm|pocketcasts/i, 'Podcasts'],
+  [/spotify\.com\/(show|episode)|podcasts\.apple|overcast\.fm|pocketcasts/i, 'Music & Podcasts'],
   [/letterboxd|imdb|rottentomatoes\.com\/m\//i, 'Movies'],
   [/rottentomatoes\.com\/tv\/|netflix|hulu|hbomax|max\.com|disneyplus|primevideo|tv\.apple|justwatch/i, 'TV Shows'],
-  [/spotify\.com|music\.apple|music\.youtube|soundcloud|bandcamp|tidal\.com/i, 'Music'],
-  [/youtube\.com|youtu\.be|vimeo\.com|tiktok\.com/i, 'Videos'],
+  [/spotify\.com|music\.apple|music\.youtube|soundcloud|bandcamp|tidal\.com/i, 'Music & Podcasts'],
+  [/youtube\.com|youtu\.be|vimeo\.com|tiktok\.com/i, 'Articles & Videos'],
   [/coursera|udemy|edx\.org|linkedin\.com\/learning|skillshare|masterclass|credly/i, 'Courses & Certs'],
   [/resy\.com|opentable|exploretock|yelp\.com|theinfatuation|eater\.com/i, 'Restaurants'],
   [/cooking\.nytimes|allrecipes|bonappetit|seriouseats|epicurious|food52|budgetbytes/i, 'Recipes'],
   [/goodreads|bookshop\.org/i, 'Books'],
   [/streeteasy|zillow|apartments\.com|renthop|redfin|trulia|realtor\.com|compass\.com|corcoran/i, 'Apartments'],
-  [/airbnb|booking\.com|hotels\.com|expedia|vrbo|marriott|hilton|hyatt/i, 'Hotels'],
+  [/airbnb|booking\.com|hotels\.com|expedia|vrbo|marriott|hilton|hyatt/i, 'Places & Travel'],
   [/tripadvisor/i, 'Places & Travel'],
   [/store\.steampowered|boardgamegeek|nintendo\.com|playstation\.com|xbox\.com|itch\.io/i, 'Games'],
-  [/apps\.apple\.com|play\.google\.com|chromewebstore|chrome\.google\.com\/webstore|producthunt/i, 'Apps'],
+  [/apps\.apple\.com|play\.google\.com|chromewebstore|chrome\.google\.com\/webstore|producthunt/i, 'Apps & Products'],
   [/eventbrite|dice\.fm|ra\.co|ticketmaster|seatgeek|partiful|lu\.ma|songkick/i, 'Events'],
-  [/substack|medium\.com|newyorker|theatlantic|nytimes\.com|wsj\.com|ft\.com|economist\.com|bloomberg\.com|wired\.com|theverge|paulgraham\.com/i, 'Articles'],
+  [/substack|medium\.com|newyorker|theatlantic|nytimes\.com|wsj\.com|ft\.com|economist\.com|bloomberg\.com|wired\.com|theverge|paulgraham\.com/i, 'Articles & Videos'],
 ];
 
 // What the map says a place is, for places whose category was a guess
@@ -76,8 +76,8 @@ const OSM_CATS = {
   deli: 'Restaurants', pastry: 'Restaurants', confectionery: 'Restaurants',
   cafe: 'Bars & Cafes', bar: 'Bars & Cafes', pub: 'Bars & Cafes', biergarten: 'Bars & Cafes', nightclub: 'Bars & Cafes', ice_cream: 'Bars & Cafes', coffee: 'Bars & Cafes', tea: 'Bars & Cafes',
   hairdresser: 'Services', beauty: 'Services', massage: 'Services', tattoo: 'Services', dentist: 'Services', doctors: 'Services', clinic: 'Services', fitness_centre: 'Services',
-  hotel: 'Hotels', hostel: 'Hotels', guest_house: 'Hotels', motel: 'Hotels',
-  clothes: 'Shops', boutique: 'Shops', second_hand: 'Shops', gift: 'Shops', florist: 'Shops', jewelry: 'Shops', shoes: 'Shops', books: 'Shops', department_store: 'Shops',
+  hotel: 'Places & Travel', hostel: 'Places & Travel', guest_house: 'Places & Travel', motel: 'Places & Travel',
+  clothes: 'Places & Travel', boutique: 'Places & Travel', second_hand: 'Places & Travel', gift: 'Places & Travel', florist: 'Places & Travel', jewelry: 'Places & Travel', shoes: 'Places & Travel', books: 'Places & Travel', department_store: 'Places & Travel',
   museum: 'Places & Travel', gallery: 'Places & Travel', attraction: 'Places & Travel', viewpoint: 'Places & Travel', park: 'Places & Travel',
   theatre: 'Places & Travel', cinema: 'Places & Travel', marketplace: 'Places & Travel',
 };
@@ -185,17 +185,8 @@ function guessCategory(text, link) {
 }
 
 // ── Parsing: "Lilia, pasta in Williamsburg, from Ana" ──
-// been: logging a place already visited. "Sushi Lin, Prospect Heights, yesterday"
-function parse(raw, override, fallbackCat, been) {
+function parse(raw, override, fallbackCat) {
   let text = raw.trim();
-  let beenAt = 0;
-  if (been) {
-    text = text.replace(/^(?:went to|been to|visited)\s+/i, '');
-    text = text.replace(/(?:^|[\s,;])(today|tonight|yesterday|last night)(?=[\s,;.]|$)/i, (_, w) => {
-      if (/yesterday|last night/i.test(w)) beenAt = Date.now() - 86400000;
-      return ' ';
-    });
-  }
   let link = '';
   const url = text.match(/https?:\/\/[^\s,]+/i);
   if (url) {
@@ -236,7 +227,7 @@ function parse(raw, override, fallbackCat, been) {
       // A named spot in a known neighborhood or city is most likely somewhere to eat; the map corrects it later
       const inPlace = text.match(/(?:^|\s)(?:in|near)\s+([^,;]{1,40}?)\s*(?=[,;]|$)/i)?.[1];
       const rest = text.split(/\s*[,;]\s*/).slice(1);
-      if (been || inPlace || rest.some(isPlaceName)) { category = 'Restaurants'; auto = true; }
+      if (inPlace || rest.some(isPlaceName)) { category = 'Restaurants'; auto = true; }
     }
   }
 
@@ -259,7 +250,7 @@ function parse(raw, override, fallbackCat, been) {
 
   const parts = text.split(/\s*[,;]\s*|\s+[-–—:]\s+/).map(s => s.trim()).filter(Boolean);
   let name = cap(parts.shift() || '');
-  if (!where && parts.length && CAT[category].action === 'map' && (been || parts.slice(0, 2).some(isPlaceName))) {
+  if (!where && parts.length && CAT[category].action === 'map' && parts.slice(0, 2).some(isPlaceName)) {
     where = titleCase(parts.shift());
     // "Shoreditch, London" keeps the city with the neighborhood
     if (parts.length && CITIES.includes(parts[0].toLowerCase())) where += ', ' + titleCase(parts.shift());
@@ -274,7 +265,7 @@ function parse(raw, override, fallbackCat, been) {
     try { name = new URL(link).hostname.replace(/^www\./, ''); } catch { name = link; }
     needsTitle = true;
   }
-  return { name, note, from, where, link, category, auto, needsTitle, beenAt, to, withs };
+  return { name, note, from, where, link, category, auto, needsTitle, to, withs };
 }
 
 // Title and picture for links from Spotify, YouTube, Vimeo and similar
@@ -440,12 +431,8 @@ function action(r) {
       return { label: 'Watch', url: `https://www.justwatch.com/us/search?q=${name}` };
     case 'listen':
       return { label: 'Listen', url: `https://open.spotify.com/search/${name}` };
-    case 'podcast':
-      return { label: 'Listen', url: `https://podcasts.apple.com/us/search?term=${name}` };
-    case 'video':
-      return { label: 'Watch', url: `https://www.youtube.com/results?search_query=${name}` };
     default: {
-      const hint = { Recipes: ' recipe', Books: ' book', 'Courses & Certs': ' course', Games: ' game', Apps: ' app', Events: ' tickets', Products: ' buy' }[r.category] || '';
+      const hint = { Recipes: ' recipe', Books: ' book', 'Courses & Certs': ' course', Games: ' game', Events: ' tickets' }[r.category] || '';
       return { label: 'Search', url: `https://www.google.com/search?q=${encodeURIComponent(r.name + hint)}` };
     }
   }
@@ -664,12 +651,12 @@ function demoSeed() {
     ['The Bear', 'TV Shows', 'Season 1, then skip to Fishes', 'Tunde', '', 45, 'loved'],
     ['Piranesi', 'Books', 'Go in knowing nothing', 'Kemi', '', 70, 'loved'],
     ['Outer Wilds', 'Games', 'Best game I have played', 'Sam', '', 50, 'tried'],
-    ['Blonde', 'Music', 'Frank Ocean', 'Tunde', '', 12],
+    ['Blonde', 'Music & Podcasts', 'Frank Ocean', 'Tunde', '', 12],
     ['Fade Room', 'Services', 'Ask for Marcus', 'Kemi', 'Bed-Stuy', 5],
     ['AWS Solutions Architect Professional', 'Courses & Certs', 'Take after Associate', 'Sam', '', 30],
     ['Smoky jollof', 'Recipes', 'Burn the bottom a little on purpose', 'Mum', '', 90],
     ['Project Hail Mary', 'Books', '', 'Ana', '', 15],
-    ['Hardcore History', 'Podcasts', 'Start with Blueprint for Armageddon', 'Sam', '', 40],
+    ['Hardcore History', 'Music & Podcasts', 'Start with Blueprint for Armageddon', 'Sam', '', 40],
     ['Devoción', 'Bars & Cafes', 'Coffee, skylight room', 'Tunde', 'Williamsburg', 2],
     // A trip, already on the map, to try public pages with
     ['Casa Lucio', 'Restaurants', 'Huevos rotos. Book ahead', 'Marta', 'La Latina, Madrid', 24, 'loved', [40.4128, -3.7085]],
@@ -709,7 +696,6 @@ const placeMatch = r => (!place.city || cityOf(r) === place.city) && (!place.hoo
 const beenTime = r => r.beenAt || r.updatedAt;
 const sortKey = r => r.status === 'todo' ? r.createdAt : beenTime(r);
 const byRecent = (a, b) => sortKey(b) - sortKey(a);
-const logging = () => status === 'tried' || status === 'loved';
 
 function route() {
   const raw = location.hash.replace(/^#\/?/, '');
@@ -778,17 +764,16 @@ function render() {
 //   3. As you type, a preview shows each part as it will be saved, with "+ in" and "+ from" for what's missing
 const EXAMPLE = {
   Restaurants: 'Lilia, in Williamsburg, from Ana', 'Bars & Cafes': 'Devoción, in Williamsburg, from Tunde',
-  Hotels: 'Hotel Esencia, in Tulum, from Ana', Shops: 'Café Forgot, in the LES, from Kemi', 'Places & Travel': 'The Cloisters, in Inwood, from Sam',
-  Movies: 'Perfect Days, from Sam', 'TV Shows': 'The Bear, from Tunde', Videos: 'Paste a link, or a title, from who',
-  Books: 'Piranesi, from Kemi', Articles: 'Paste a link, from who', Podcasts: 'Hardcore History, from Sam',
-  Music: 'Blonde, Frank Ocean, from Tunde', Games: 'Outer Wilds, from Sam', Events: 'Paste a link, or a name, from who',
-  Recipes: 'Smoky jollof, from Mum', Apps: 'Paste a link, or a name, from who', Products: 'Name, from who',
+  'Places & Travel': 'The Cloisters, in Inwood, from Sam',
+  Movies: 'Perfect Days, from Sam', 'TV Shows': 'The Bear, from Tunde', Books: 'Piranesi, from Kemi',
+  'Articles & Videos': 'Paste a link, from who', 'Music & Podcasts': 'Blonde, Frank Ocean, from Tunde',
+  Games: 'Outer Wilds, from Sam', Events: 'Paste a link, or a name, from who',
+  Recipes: 'Smoky jollof, from Mum', 'Apps & Products': 'Paste a link, or a name, from who',
   'Courses & Certs': 'AWS SA Pro, from Sam', Services: 'Fade Room barber, in Bed-Stuy, from Kemi', Apartments: '350 Broadway, great light',
   Other: 'Name, a note, from who',
 };
 
 function addHint(r) {
-  if (logging()) return 'Sushi Lin, Prospect Heights';
   if (r.view !== 'cat') return 'Lilia, in Williamsburg, from Ana';
   return EXAMPLE[r.cat] || 'Name, a note, from who';
 }
@@ -797,7 +782,6 @@ function addHint(r) {
 function formula() {
   const r = route();
   const kw = w => `<b>${w}</b>`;
-  if (logging()) return `${kw('Place')}, where it is. Add ${kw('yesterday')} if it was.`;
   if (r.cat === 'Apartments') return `${kw('Address')}, what you thought`;
   const place = r.view !== 'cat' || CAT[r.cat].action === 'map';
   const rule = `${kw(r.view === 'cat' && !place ? 'Title' : 'Name')}, a note, ${place ? `${kw('in')} where, ` : ''}${kw('from')} who`;
@@ -912,6 +896,7 @@ function bindSwipe() {
 
 function swipeDelete(wrap, id) {
   track('swipe');
+  pref.set('swiped', '1');
   if (reduceMotion.matches) { deleteRec(id); return; }
   // Off to the left, then the gap closes
   wrap.querySelector('.row').style.transform = 'translateX(-100%)';
@@ -930,19 +915,21 @@ function swipeStatus(id) {
   patch(id, p);
   track(next, r.category);
   track('swipe');
+  pref.set('swiped', '1');
   toast(next === 'loved' ? `Loved ${r.name}` : r.status === 'loved' ? `${r.name} back to Tried` : `Tried ${r.name}`, () => patch(id, prev));
 }
 
 function emptyFor() {
   const where = place.hood || place.city;
   const what = { all: 'Nothing here', todo: 'Nothing to try', tried: 'Nothing tried', loved: 'Nothing loved' }[status];
-  const hint = logging() ? 'Type a place you went below, like "Sushi Lin, Prospect Heights".' : 'Type a rec below the way you\'d text it.';
+  const hint = status === 'tried' || status === 'loved' ? 'Swipe a row right when you\'ve tried it, and it shows here.' : 'Type a rec below the way you\'d text it.';
   return `<div class="none"><p>${what}${where ? ` in ${esc(where)}` : ''} yet.</p><p class="sub">${hint}</p></div>`;
 }
 
 function renderHome() {
   const recs = all();
-  const sent = status === 'all' && !place.city ? inboxHtml() : '';
+  const sample = DEMO ? `<p class="tip"><span>This is sample data, to look around.</span><a class="link-btn" href="${esc(location.pathname)}">Sign in to start yours</a></p>` : '';
+  const sent = sample + (status === 'all' && !place.city ? inboxHtml() : '');
   if (!recs.length) {
     return `${sent}<div class="empty">
       <h2>Nothing saved yet</h2>
@@ -957,8 +944,11 @@ function renderHome() {
   const shown = recs.filter(r => statusMatch(r) && placeMatch(r));
   if (!shown.length) return sent + emptyFor();
 
+  // Until the first swipe, say that rows swipe
+  const tip = pref.get('swiped', '') === '1' ? '' : `<p class="tip"><span>Swipe a row right when you've tried it. Swipe left to delete.</span><button data-tip-x aria-label="Got it">${ICON.x}</button></p>`;
+
   // One group per category: the three most recent, then a way into the rest
-  return sent + CATEGORIES.map(c => {
+  return sent + tip + CATEGORIES.map(c => {
     const inCat = shown.filter(r => r.category === c.id).sort(byRecent);
     if (!inCat.length) return '';
     return `<section class="group">
@@ -1264,10 +1254,13 @@ function renderDetail() {
   sheet.innerHTML = `
     <div class="grab"><div class="handle"></div>
       <div class="sheet-head">
-        <span class="eyebrow" id="dCat">${esc(r.category)}</span>
+        <button class="eyebrow cat-btn" data-dcat aria-label="Change category"><span id="dCat">${esc(r.category)}</span>
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg></button>
         <button class="link-btn" data-close>Done</button>
       </div>
     </div>
+    <div class="chips cat-chips hidden" id="dCats">${CATEGORIES.map(c =>
+      `<button class="chip ${r.category === c.id ? 'on' : ''}" data-setcat="${esc(c.id)}">${esc(c.id)}</button>`).join('')}</div>
     <input class="f-name" data-field="name" value="${esc(r.name)}" aria-label="Name" />
     <div class="seg" style="--n:3;--i:${i}">
       ${[['todo', 'Want to try'], ['tried', 'Tried'], ['loved', 'Loved']].map(([s, l]) =>
@@ -1286,10 +1279,6 @@ function renderDetail() {
     </div>
     <div class="field" id="dWith">${withRow(r)}</div>
     <label class="field"><span>Link</span><input data-field="link" type="url" inputmode="url" value="${esc(r.link)}" /></label>
-    <div class="field"><span>Category</span>
-      <div class="chips">${CATEGORIES.map(c =>
-        `<button class="chip ${r.category === c.id ? 'on' : ''}" data-setcat="${esc(c.id)}">${esc(c.id)}</button>`).join('')}</div>
-    </div>
     <div class="sheet-foot">
       <button class="link-btn danger" data-delete>Delete</button>
       <span id="dWhen">${parts.when}</span>
@@ -1413,6 +1402,7 @@ function openAccount() {
       <p class="sub">Everything is saved to this account, so it's on any phone or computer you sign in on.</p>
     </div>
     <div class="list opts">
+      <button class="opt" data-guide><span class="opt-name">How it works</span><span class="opt-count">${ICON.chevron}</span></button>
       <a class="opt" href="#/sent"><span class="opt-name">Sent by me</span><span class="opt-count">${Object.keys(sent).length || ''} ${ICON.chevron}</span></a>
       <button class="opt" data-friends><span class="opt-name">Friends</span><span class="opt-count">${friendList().length || 'Add'} ${ICON.chevron}</span></button>
       <button class="opt" data-pub-manage><span class="opt-name">Public page</span><span class="opt-count">${pubCfg.name ? esc(listJoin(pubLabels()) || 'Nothing on it') : 'Off'} ${ICON.chevron}</span></button>
@@ -1420,8 +1410,7 @@ function openAccount() {
       ${isAdmin ? `<a class="opt" href="#/usage"><span class="opt-name">Usage</span><span class="opt-count">Only you see this ${ICON.chevron}</span></a>` : ''}
     </div>
     <div class="account-actions">
-      <button class="btn sec wide" data-invite>Invite a friend</button>
-      <button class="btn sec wide" data-signout>Sign out</button>
+      <button class="btn sec wide" data-signout>${DEMO ? 'Leave the sample' : 'Sign out'}</button>
     </div>`;
   delete $('sheet').dataset.id;
   $('sheet').dataset.view = 'account';
@@ -1546,13 +1535,14 @@ function drawShareSheet() {
   const one = n === 1 && s.title === s.recs[0].name;
   $('sheet').innerHTML = `${sheetHead(one ? 'Share' : s.page ? `Share ${s.page.label}` : `Share ${n}`)}
     ${n <= 20 ? friendsCard() : ''}
-    ${s.page ? publicCard(s.page) : publicIntro()}
-    <h3 class="sheet-sub">Or send ${n === 1 ? 'just this' : `these ${n}`} as a list</h3>
-    <label class="field"><span>Title</span><input id="shareTitle" value="${esc(s.title)}" /></label>
-    ${one ? '' : `<p class="hint">${esc(names)}</p>`}
-    <label class="toggle"><span>Include my notes</span><input type="checkbox" id="shareNotes" ${s.notes ? 'checked' : ''} /></label>
-    <button class="btn wide sec" data-share-go>Share list</button>
-    <p class="hint">Whoever opens the link sees ${n === 1 ? 'this' : 'these'} and can save ${n === 1 ? 'it' : 'any of them'} to their own Recs. Nothing else of yours is visible.</p>`;
+    <h3 class="sheet-sub">Share a link</h3>
+    ${one ? '' : `<label class="field"><span>Title</span><input id="shareTitle" value="${esc(s.title)}" /></label>
+      <p class="hint">${esc(names)}</p>`}
+    ${s.recs.some(r => r.note) ? `<label class="toggle"><span>Include my notes</span><input type="checkbox" id="shareNotes" ${s.notes ? 'checked' : ''} /></label>` : ''}
+    <button class="btn wide" data-share-go>Share link</button>
+    <p class="hint">Whoever opens it sees only ${n === 1 ? 'this' : 'these'}, and can save ${n === 1 ? 'it' : 'any of them'} to their own Recs.</p>
+    <h3 class="sheet-sub">Public page</h3>
+    ${s.page ? publicCard(s.page) : publicIntro()}`;
   delete $('sheet').dataset.id;
   $('sheet').dataset.view = 'share';
 }
@@ -1609,8 +1599,8 @@ let pubErr = '';         // 'setup' when the database doesn't allow public pages
 let pubBusy = false;
 let pubLast = '', pubTimer = 0, loaded = false;
 
-const TRIP_CATS = ['Restaurants', 'Bars & Cafes', 'Hotels', 'Shops', 'Places & Travel'];
-const SHELF_CATS = ['Movies', 'TV Shows', 'Videos', 'Books', 'Articles', 'Podcasts', 'Music', 'Games', 'Events', 'Recipes', 'Apps', 'Products', 'Courses & Certs'];
+const TRIP_CATS = ['Restaurants', 'Bars & Cafes', 'Places & Travel'];
+const SHELF_CATS = ['Movies', 'TV Shows', 'Books', 'Articles & Videos', 'Music & Podcasts', 'Games', 'Events', 'Recipes', 'Apps & Products', 'Courses & Certs'];
 const done = r => r.status !== 'todo';
 const inTrip = city => r => done(r) && TRIP_CATS.includes(r.category) && cityOf(r) === city;
 const inShelf = cat => r => done(r) && r.category === cat;
@@ -1627,7 +1617,7 @@ const listJoin = a => a.length < 2 ? a.join('') : a.slice(0, -1).join(', ') + ' 
 const webUrl = u => /^https?:\/\//i.test(u || '') ? u : '';
 
 // "6 books", "1 show"
-const NOUN = { Movies: 'movie', 'TV Shows': 'show', Videos: 'video', Books: 'book', Articles: 'article', Podcasts: 'podcast', Games: 'game', Events: 'event', Recipes: 'recipe', Apps: 'app', 'Courses & Certs': 'course' };
+const NOUN = { Movies: 'movie', 'TV Shows': 'show', Books: 'book', Games: 'game', Events: 'event', Recipes: 'recipe', 'Courses & Certs': 'course' };
 const count = (n, cat) => { const w = NOUN[cat] || (cat ? 'pick' : 'place'); return `${n} ${w}${n === 1 ? '' : 's'}`; };
 
 function buildPub() {
@@ -1736,6 +1726,12 @@ function sharePub(key) {
 }
 
 // The top of the share sheet, for a city picked in Where or a category you're in
+// What went wrong, in plain words; the owner also sees the likely cause
+const PUB_ERR = () => ({
+  setup: 'Public pages aren\'t working right now. Try again later.' + (isAdmin ? ' (Owner: the database rules need the pub part.)' : ''),
+  taken: 'Every name like yours is taken. Try again later.',
+}[pubErr]);
+
 function publicCard({ kind, label }) {
   const on = isPublic(kind, label) && !!pubCfg.name;
   const n = pageRecs(kind, label).length;
@@ -1745,14 +1741,11 @@ function publicCard({ kind, label }) {
   const what = n
     ? `Anyone with the link sees the ${thing}${notes}. It updates as you go. Who recommended ${n === 1 ? 'it' : 'them'} stays private.`
     : `Mark ${kind === 'trip' ? `places in ${esc(label)}` : esc(label.toLowerCase())} as Tried or Loved and they show up here.`;
-  const err = {
-    setup: 'Public pages need one change in the Firebase database rules first. The rule is in the code, above firebasePub.',
-    taken: 'Every name like yours is taken. Try again later.',
-  }[pubErr];
+  const err = PUB_ERR();
   return `<div class="pub-card">
     <label class="toggle bare"><span>${esc(label)} on your public page</span><input type="checkbox" data-pub-kind="${kind}" data-pub-label="${esc(label)}" ${on ? 'checked' : ''} ${pubBusy ? 'disabled' : ''} /></label>
     ${on ? `<a class="pub-link" href="${esc(url)}">${esc(prettyUrl(url))}</a>
-      <button class="btn wide" data-pub-share="${esc(slug(label))}">Share page</button>` : ''}
+      <button class="btn wide sec tint" data-pub-share="${esc(slug(label))}">Share page</button>` : ''}
     <p class="hint">${err ? esc(err) : what}</p>
     <button class="link-btn manage" data-pub-manage>Everything on your page ${ICON.chevron}</button>
   </div>`;
@@ -1775,7 +1768,7 @@ function publicIntro() {
       <span><b>Your public page</b><small>${on.length && url ? esc(listJoin(on)) : 'Show friends what you loved, by city or by category'}</small></span>
       ${ICON.chevron}
     </button>
-    ${on.length && url ? `<button class="btn wide" data-pub-share="">Share my page</button>` : ''}
+    ${on.length && url ? `<button class="btn wide sec tint" data-pub-share="">Share my page</button>` : ''}
   </div>`;
 }
 
@@ -1805,7 +1798,7 @@ function drawPublic() {
     return keys.length ? `<h3 class="sheet-sub">${title}</h3><div class="list opts toggles">${keys.map(k => row(kind, k, obj[k])).join('')}</div>` : '';
   };
   const url = pubCfg.name ? pubUrl(pubCfg.name) : '';
-  const err = { setup: 'Public pages need one change in the Firebase database rules first.', taken: 'Every name like yours is taken. Try again later.' }[pubErr];
+  const err = PUB_ERR();
   $('sheet').innerHTML = `${sheetHead('Public page')}
     <p class="hint">Friends see what you tried or loved in the cities and categories you turn on, with your notes if you like. It updates as you go. Who recommended things stays private.</p>
     ${err ? `<p class="hint err">${esc(err)}</p>` : ''}
@@ -1821,6 +1814,8 @@ function drawPublic() {
 }
 
 // ── Opening a public page ──
+// A link to a shelf from before the merge (…/podcasts) opens the merged one
+const OLD_SHELF = Object.fromEntries(Object.entries(MERGED).map(([a, b]) => [slug(a), slug(b)]));
 let pubPage = null;  // { name, at, data }
 
 async function renderPub() {
@@ -1847,7 +1842,7 @@ async function renderPub() {
   if (!data) { drawMissing('Nothing here', 'The link may be wrong, or the page was taken down.'); return; }
   const by = String(data.by || 'A friend').slice(0, 40);
   if (!r.trip) { drawProfile(data, name, by); return; }
-  const t = data.trips?.[r.trip], sh = data.shelves?.[r.trip];
+  const t = data.trips?.[r.trip], sh = data.shelves?.[r.trip] || data.shelves?.[OLD_SHELF[r.trip]];
   const page = t || sh;
   if (!page) { drawMissing(`${by} hasn't made this public`, '', `#/@${name}`, `See ${by}'s recs`); return; }
   const key = `@${name}/${r.trip}`;
@@ -2166,9 +2161,34 @@ function sendTo(friend, recs) {
     toast(`Sent ${out.length === 1 ? out[0].name : `${out.length} recs`} to ${friend.by}`, () => { location.hash = '/sent'; }, 'See sent');
     return true;
   }, () => {
-    toast(`Couldn't send to ${friend.by} yet. The database rules need the inbox part.`);
+    toast(`Couldn't send to ${friend.by}. Try again in a moment.`);
     return false;
   });
+}
+
+// Put someone on your list, and tell them so you're on theirs. Gives back their first name, or '' if it failed.
+async function befriend(name, data) {
+  const by = String(data.by || name).slice(0, 40);
+  try { await rememberFriend(name, by, data.uid); } catch { toast(`Couldn't add ${by}. Try again in a moment.`); return ''; }
+  store.send(data.uid, { kind: 'friend', name: '', from: firstName(), fromName: pubCfg.name || '', fromUid: store.uid, at: Date.now() }).catch(() => {});
+  track('friend_add');
+  return by;
+}
+
+// From the Friends sheet: type their @name, the one in their link
+async function addByName(raw) {
+  const name = slug(String(raw).replace(/^@/, '')).slice(0, 24);
+  if (!name) { $('friendName')?.focus(); return; }
+  if (name === pubCfg.name) { toast('That\'s your own name'); return; }
+  if (friends[name]?.uid) { toast(`${friends[name].by} is already a friend`); return; }
+  let data = null;
+  try { data = await pub.get(name); } catch {}
+  if (!data?.uid) { toast(`No one on Recs is @${name}`); return; }
+  if (data.uid === store.uid) { toast('That\'s your own name'); return; }
+  const by = await befriend(name, data);
+  if (!by) return;
+  toast(`Added ${by}`);
+  if (isOpen() && $('sheet').dataset.view === 'friends') drawFriends();
 }
 
 async function addFriend(name) {
@@ -2179,11 +2199,8 @@ async function addFriend(name) {
     return;
   }
   if (!data?.uid || data.uid === store.uid) return;
-  const by = String(data.by || name).slice(0, 40);
-  try { await rememberFriend(name, by, data.uid); } catch { toast('Adding friends needs the new database rules'); return; }
-  // Tell them, so you're on their list too
-  store.send(data.uid, { kind: 'friend', name: '', from: firstName(), fromName: pubCfg.name || '', fromUid: store.uid, at: Date.now() }).catch(() => {});
-  track('friend_add');
+  const by = await befriend(name, data);
+  if (!by) return;
   toast(`Added ${by}. Send them recs from Share, or add "for ${by}".`);
   $('sharedView').dataset.key = '';
   renderPub();
@@ -2290,16 +2307,21 @@ function openFriends() {
 }
 
 function drawFriends() {
-  const url = pubCfg.name ? pubUrl(pubCfg.name) : '';
   const fs = friendList();
   $('sheet').innerHTML = `${sheetHead('Friends')}
-    <p class="hint">Friends can send recs straight into each other's Recs. To add someone, open their link and tap Add. To be added, send them yours.</p>
-    ${url ? `<div class="pub-card"><a class="pub-link first" href="${esc(url)}">${esc(prettyUrl(url))}</a><button class="btn wide" data-invite>Send my link</button></div>` : '<button class="btn wide" data-invite>Invite a friend</button>'}
+    <p class="hint">Friends can send recs straight into each other's Recs.${pubCfg.name ? ` Your name is <b>@${esc(pubCfg.name)}</b>.` : ''}</p>
+    <div class="field name-add">
+      <input id="friendName" placeholder="A friend's @name" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done" aria-label="A friend's name" />
+      <button class="btn" data-friend-add>Add</button>
+    </div>
     ${fs.length ? `<h3 class="sheet-sub">${fs.length} ${fs.length === 1 ? 'friend' : 'friends'}</h3>
       <div class="list opts">${fs.map(f => `<div class="opt friend-opt">
         <a class="opt-name" href="#/@${esc(f.name)}">${esc(f.by)} <small>@${esc(f.name)}</small></a>
         <button class="link-btn danger" data-unfriend="${esc(f.name)}">Remove</button>
-      </div>`).join('')}</div>` : ''}`;
+      </div>`).join('')}</div>` : ''}
+    <h3 class="sheet-sub">Not on Recs yet?</h3>
+    <button class="btn wide sec" data-invite>Invite a friend</button>
+    <p class="hint">This sends them your link. When they open it and tap Add, you're on each other's list.</p>`;
   delete $('sheet').dataset.id;
   $('sheet').dataset.view = 'friends';
 }
@@ -2430,7 +2452,7 @@ function sendIdea() {
   t.blur();
   store.addIdea({ uid: store.uid, by: firstName(), text: text.slice(0, 500), at: Date.now() })
     .then(() => { track('idea'); toast('Thanks. Your idea is on the list.'); },
-      () => { if ($('ideaText')) $('ideaText').value = text; toast('Ideas need the new database rules'); });
+      () => { if ($('ideaText')) $('ideaText').value = text; toast('Couldn\'t add your idea. Try again in a moment.'); });
 }
 
 // ── Usage: what people do, counted per day ──
@@ -2485,7 +2507,9 @@ async function renderUsage() {
   const top = Math.max(1, ...daily);
   const fmt = d => new Date(d + 'T12:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   const bars = days.map((d, i) => `<span class="bar" style="--h:${daily[i] / top}" data-tip="${esc(fmt(d))}: ${daily[i]} ${daily[i] === 1 ? 'person' : 'people'}" title="${esc(fmt(d))}: ${daily[i]}"></span>`).join('');
-  const cats = CATEGORIES.map(c => [c.id, SUM(days, data, `add~${slug(c.id)}`), SUM(days, data, `loved~${slug(c.id)}`)]).filter(c => c[1] || c[2]).sort((a, b) => b[1] - a[1] || b[2] - a[2]);
+  // Counts kept under a category's old names are added to its new one
+  const withOld = (e, id) => [id, ...Object.keys(MERGED).filter(k => MERGED[k] === id)].reduce((n, c) => n + SUM(days, data, `${e}~${slug(c)}`), 0);
+  const cats = CATEGORIES.map(c => [c.id, withOld('add', c.id), withOld('loved', c.id)]).filter(c => c[1] || c[2]).sort((a, b) => b[1] - a[1] || b[2] - a[2]);
   const cmax = Math.max(1, ...cats.map(c => c[1]));
   const swipes = sumBoth(['swipe'])[0], ideasN = sumBoth(['idea'])[0];
   const anyData = days.some(d => data[d]);
@@ -2513,6 +2537,83 @@ async function renderUsage() {
     <div class="shared-foot"><button class="btn sec wide" data-ideas>Open ideas</button>${footNote()}</div>`;
 }
 
+// ── How it works ──
+// One set of words, shown two ways: the first three as a short tour for someone new,
+// all of them as the "How it works" sheet in Account.
+const GUIDE = [
+  { title: 'Save it in one line',
+    text: 'Type a rec the way you\'d text it: the name, in where, from who. Recs works out what kind of thing it is. A pasted link works too.',
+    art: () => `<div class="tour-input">Lilia, in Williamsburg, from Ana</div>
+      <div class="tour-pills"><span class="pv-cat">Restaurants</span><span class="pv-name">Lilia</span><span class="pv-part"><i>in</i> Williamsburg</span><span class="pv-part"><i>from</i> Ana</span></div>` },
+  { title: 'Tick it off',
+    text: 'Everything starts as Want to try. Swipe a row right when you\'ve tried it, and again if you loved it. Swipe left to delete. Both can be undone.',
+    art: () => `<div class="list">${[['todo', 'Lilia', 'Want to try'], ['tried', 'Via Carota', 'Tried'], ['loved', 'Sushi Lin', 'Loved']]
+      .map(([status, name, label]) => `<div class="row">${mark({ status })}<div class="row-body"><div class="row-name">${name}</div><div class="row-meta">${label}</div></div></div>`).join('')}</div>` },
+  { title: 'Pass it on',
+    text: 'The share arrow sends one rec, or a whole list, as a link anyone can open. Once a friend is on Recs, write "for" and their name to drop it straight into their list.',
+    art: () => `<div class="tour-input">Dishoom, for Daksh<span class="add-btn sending">${ICON.send}</span></div>
+      <div class="tour-pills"><span class="pv-cat">Restaurants</span><span class="pv-name">Dishoom</span><span class="pv-part to"><i>for</i> Daksh</span></div>` },
+  { title: 'Find it again',
+    text: 'Search by name, person or place. Narrow the list to a city or neighborhood, or open the map to see what\'s near you.' },
+  { title: 'Friends',
+    text: 'Open Friends in Account. Add someone by their @name, or invite them with your link. What a friend sends you waits at the top of your list until you save it or let it go.' },
+  { title: 'Public page',
+    text: 'A page of what you tried or loved, for the cities and categories you choose. It updates as you go. Who recommended things, and anything you only want to try, stays private.' },
+];
+// The words the add box reads
+const WORDS = [['in Williamsburg', 'where it is'], ['from Ana', 'who told you'], ['for Daksh', 'send it to a friend'], ['with Monica', 'who you went with'],
+  ['book, show, bar', 'the kind of thing'], ['a link', 'opens with one tap later']];
+const TOUR_STEPS = 3;
+
+function openTour() {
+  const el = $('tour');
+  el.innerHTML = `<button class="link-btn tour-skip" data-tour-end>Skip</button>
+    <div class="tour-track" id="tourTrack">${GUIDE.slice(0, TOUR_STEPS).map(g => `<section class="tour-card">
+      <div class="tour-art" aria-hidden="true">${g.art()}</div><h2>${esc(g.title)}</h2><p>${esc(g.text)}</p></section>`).join('')}</div>
+    <div class="tour-foot">
+      <div class="tour-dots" aria-hidden="true">${'<i></i>'.repeat(TOUR_STEPS)}</div>
+      <button class="btn-primary" id="tourNext" data-tour-next>Next</button>
+    </div>`;
+  el.classList.remove('hidden');
+  $('tourTrack').addEventListener('scroll', tourAt, { passive: true });
+  tourAt();
+  $('tourNext').focus({ preventScroll: true });
+}
+
+// Which card is showing; the track scrolls sideways, by swipe or by Next
+const tourIndex = () => { const t = $('tourTrack'); return Math.round(t.scrollLeft / Math.max(1, t.clientWidth)); };
+function tourAt() {
+  const i = tourIndex();
+  $('tour').querySelectorAll('.tour-dots i').forEach((d, j) => d.classList.toggle('on', j === i));
+  $('tourNext').textContent = i === TOUR_STEPS - 1 ? (store ? 'Start' : 'Got it') : 'Next';
+}
+
+function tourNext() {
+  const i = tourIndex();
+  if (i >= TOUR_STEPS - 1) { closeTour(); return; }
+  const t = $('tourTrack');
+  t.scrollTo({ left: (i + 1) * t.clientWidth, behavior: reduceMotion.matches ? 'auto' : 'smooth' });
+}
+
+function closeTour() {
+  pref.set('tour', '1');
+  $('tour').classList.add('hidden');
+  $('tour').innerHTML = '';
+}
+
+function openGuide() {
+  detailId = null;
+  shareState = null;
+  $('sheet').innerHTML = `${sheetHead('How it works')}
+    ${GUIDE.map((g, i) => `<section class="guide"><h3>${i < TOUR_STEPS ? `<span class="guide-n">${i + 1}</span>` : ''}${esc(g.title)}</h3><p>${esc(g.text)}</p></section>`).join('')}
+    <section class="guide"><h3>Words the box understands</h3>
+      <div class="words">${WORDS.map(([w, means]) => `<span class="pv-part"><i>${esc(w)}</i></span><span>${esc(means)}</span>`).join('')}</div>
+    </section>`;
+  delete $('sheet').dataset.id;
+  $('sheet').dataset.view = 'guide';
+  openSheet();
+}
+
 // ── Adding ──
 function updatePreview() {
   const input = $('addInput');
@@ -2528,13 +2629,12 @@ function updatePreview() {
     box.classList.toggle('hidden', !show);
     return;
   }
-  const p = parse(text, override, route().cat, logging());
+  const p = parse(text, override, route().cat);
   const place = CAT[p.category].action === 'map' || p.category === 'Other';
   const part = (w, v) => `<span class="pv-part"><i>${w}</i> ${esc(v)}</span>`;
   // No "+ for" while you're already typing a "for" name
   const typingKw = raw.match(/(?:^|[\s,])(from|in|near|for|with)\s+[^,;.]*$/i)?.[1].toLowerCase();
   const add = w => w === typingKw ? '' : `<button class="pv-add" data-insert="${w}">+ ${w}</button>`;
-  const when = logging() ? `<span class="pv-status">${status === 'loved' ? 'Loved' : 'Tried'}${p.beenAt ? ' yesterday' : ''}</span>` : '';
   const sugg = suggestions(raw);
   box.innerHTML = `
     ${sugg ? `<div class="pv-sugg">${sugg}</div>` : ''}
@@ -2542,7 +2642,6 @@ function updatePreview() {
       <button class="pv-cat" data-pick>${esc(p.category)}
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>
       </button>
-      ${when}
       ${p.name ? `<span class="pv-name">${esc(p.name)}</span>` : ''}
       ${p.where ? part('in', p.where) : ''}
       ${p.from ? part('from', p.from) : ''}
@@ -2550,9 +2649,9 @@ function updatePreview() {
       ${p.link ? '<span class="pv-part"><i>link</i></span>' : ''}
       ${p.to ? `<span class="pv-part to"><i>for</i> ${esc(p.to.uid ? reachAs(p.to) : p.to.by)}</span>` : ''}
       ${p.withs.length ? `<span class="pv-part"><i>with</i> ${esc(listJoin(p.withs.map(w => w.by)))}</span>` : ''}
-      ${!p.where && place && !logging() ? add('in') : ''}
+      ${!p.where && place ? add('in') : ''}
       ${!p.from && !p.to ? add('from') : ''}
-      ${!p.to && !logging() && friendList().length ? add('for') : ''}
+      ${!p.to && friendList().length ? add('for') : ''}
     </div>`;
   box.classList.remove('hidden');
   sendMode(p.to);
@@ -2627,8 +2726,7 @@ function save() {
   const input = $('addInput');
   const text = input.value.trim();
   if (!text) { input.focus(); return; }
-  const been = logging();
-  const p = parse(text, override, route().cat, been);
+  const p = parse(text, override, route().cat);
   if (!p.name) { toast('Add a name first'); return; }
 
   const done = () => { input.value = ''; override = null; updatePreview(); input.blur(); };
@@ -2642,15 +2740,6 @@ function save() {
     return;
   }
   const dupe = all().find(r => r.name.toLowerCase() === p.name.toLowerCase() && (r.category === p.category || p.auto));
-  // Logging a place you'd saved as a rec ticks off the rec instead of making a second one
-  if (dupe && been) {
-    const fields = { status, beenAt: p.beenAt || Date.now(), beenPrec: null };
-    if (!dupe.where && p.where) fields.where = p.where;
-    patch(dupe.id, fields);
-    done();
-    toast(`Marked ${dupe.name} as ${status === 'loved' ? 'loved' : 'tried'}`);
-    return;
-  }
   if (dupe) {
     toast(`Already saved in ${dupe.category}`);
     openDetail(dupe.id);
@@ -2660,15 +2749,15 @@ function save() {
   const now = Date.now();
   const rec = {
     name: p.name, category: p.category, note: p.note, from: p.from, where: p.where,
-    link: p.link, image: '', status: been ? status : 'todo', createdAt: now, updatedAt: now
+    link: p.link, image: '', status: 'todo', createdAt: now, updatedAt: now
   };
-  if (been) rec.beenAt = p.beenAt || now;
   if (p.auto) rec.auto = true;
   if (p.withs.length) rec.with = withObj(p.withs);
+  // A new rec is a Want to try: on Tried or Loved it would be saved out of sight
+  if (status === 'tried' || status === 'loved') { status = 'all'; pref.set('status', status); }
   const id = store.add(rec);
   track('add', p.category);
   if (rec.with) tellWith({ id, ...rec }, Object.keys(rec.with));
-  if (been) track(status, p.category);
 
   done();
   toast(`Saved to ${p.category}`);
@@ -2726,7 +2815,9 @@ function bindEvents() {
 
   // Keyboard: Escape closes the sheet, Enter or Space opens a focused row
   document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && !$('tour').classList.contains('hidden')) { e.preventDefault(); closeTour(); return; }
     if (e.key === 'Escape' && isOpen()) { e.preventDefault(); closeSheet(); return; }
+    if (e.key === 'Enter' && e.target.id === 'friendName') { e.preventDefault(); addByName(e.target.value); return; }
     const row = e.target.closest?.('[data-open]');
     if (row && e.target === row && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openDetail(row.dataset.open); }
   });
@@ -2765,11 +2856,18 @@ function bindEvents() {
     if (swiped) { swiped = false; e.preventDefault(); return; }
     if (t.closest('a')) return;
 
-    const el = t.closest('[data-copy-uid],[data-unsent],[data-unwith],[data-in-save],[data-in-drop],[data-send],[data-friends],[data-unfriend],[data-ideas],[data-vote],[data-idea-send],[data-idea-status],[data-add-friend],[data-pub-manage],[data-insert],[data-complete],[data-pub-share],[data-toggle-city],[data-share-list],[data-share-one],[data-share-go],[data-invite],[data-save],[data-save-all],[data-go-home],[data-cat],[data-open],[data-example],[data-status],[data-status-filter],[data-places],[data-place],[data-unpinned],[data-focus],[data-setcat],[data-delete],[data-close],[data-pick],[data-pickcat],[data-signout]');
+    const el = t.closest('[data-friend-add],[data-tour],[data-tour-next],[data-tour-end],[data-guide],[data-tip-x],[data-dcat],[data-copy-uid],[data-unsent],[data-unwith],[data-in-save],[data-in-drop],[data-send],[data-friends],[data-unfriend],[data-ideas],[data-vote],[data-idea-send],[data-idea-status],[data-add-friend],[data-pub-manage],[data-insert],[data-complete],[data-pub-share],[data-toggle-city],[data-share-list],[data-share-one],[data-share-go],[data-invite],[data-save],[data-save-all],[data-go-home],[data-cat],[data-open],[data-example],[data-status],[data-status-filter],[data-places],[data-place],[data-unpinned],[data-focus],[data-setcat],[data-delete],[data-close],[data-pick],[data-pickcat],[data-signout]');
     if (!el) return;
     const d = el.dataset;
 
-    if (d.copyUid !== undefined) navigator.clipboard.writeText(store.uid).then(() => toast('Copied'), () => toast(store.uid));
+    if (d.friendAdd !== undefined) addByName($('friendName').value);
+    else if (d.tour !== undefined) openTour();
+    else if (d.tourNext !== undefined) tourNext();
+    else if (d.tourEnd !== undefined) closeTour();
+    else if (d.guide !== undefined) openGuide();
+    else if (d.tipX !== undefined) { pref.set('swiped', '1'); el.closest('.tip').remove(); }
+    else if (d.dcat !== undefined) $('dCats').classList.toggle('hidden');
+    else if (d.copyUid !== undefined) navigator.clipboard.writeText(store.uid).then(() => toast('Copied'), () => toast(store.uid));
     else if (d.unsent !== undefined) store.dropSent(d.unsent);
     else if (d.unwith !== undefined) removeWith(detailId, d.unwith);
     else if (d.inSave !== undefined) inboxSave(d.inSave);
@@ -2781,7 +2879,7 @@ function bindEvents() {
     else if (d.friends !== undefined) openFriends();
     else if (d.unfriend !== undefined) { store.setFriend(d.unfriend, null); const f = friends[d.unfriend]; friends = { ...friends }; delete friends[d.unfriend]; drawFriends(); toast(`Removed ${f?.by || d.unfriend}`); }
     else if (d.ideas !== undefined) openIdeas();
-    else if (d.vote !== undefined) { const x = ideas[d.vote]; const on = !x?.votes?.[store.uid]; store.vote(d.vote, on).catch(() => toast('Voting needs the new database rules')); if (on) track('vote'); }
+    else if (d.vote !== undefined) { const x = ideas[d.vote]; const on = !x?.votes?.[store.uid]; store.vote(d.vote, on).catch(() => toast('Couldn\'t count your vote. Try again.')); if (on) track('vote'); }
     else if (d.ideaSend !== undefined) sendIdea();
     else if (d.ideaStatus !== undefined && isAdmin) { const cur = ideas[d.ideaStatus]?.status || ''; store.ideaStatus(d.ideaStatus, IDEA_STATUS[(IDEA_STATUS.indexOf(cur) + 1) % IDEA_STATUS.length]); }
     else if (d.addFriend !== undefined) addFriend(d.addFriend);
@@ -2810,7 +2908,6 @@ function bindEvents() {
       status = d.statusFilter;
       pref.set('status', status);
       render();
-      updatePreview();
     }
     else if (d.places !== undefined) openPlaces();
     else if (d.place !== undefined) { place = { city: d.place, hood: d.hood }; closeSheet(); render(); }
@@ -2822,17 +2919,17 @@ function bindEvents() {
       patch(detailId, p);
       if (d.status !== 'todo') track(d.status, items[detailId].category);
     }
-    else if (d.setcat !== undefined) patch(detailId, { category: d.setcat, auto: null });
+    else if (d.setcat !== undefined) { patch(detailId, { category: d.setcat, auto: null }); $('dCats')?.classList.add('hidden'); }
     else if (d.delete !== undefined) deleteRec(detailId);
     else if (d.close !== undefined) closeSheet();
     else if (d.pick !== undefined) {
       const picker = $('picker');
       picker.classList.toggle('hidden');
-      if (!picker.classList.contains('hidden')) renderPicker(parse($('addInput').value, override, route().cat, logging()).category);
+      if (!picker.classList.contains('hidden')) renderPicker(parse($('addInput').value, override, route().cat).category);
     }
     else if (d.pickcat !== undefined) { override = d.pickcat; $('picker').classList.add('hidden'); updatePreview(); }
     else if (d.signout !== undefined) {
-      if (DEMO) { localStorage.removeItem('recs-demo'); location.reload(); }
+      if (DEMO) { localStorage.removeItem('recs-demo'); location.href = location.pathname; }
       else signOut(getAuth()).then(() => location.reload());
     }
   });
@@ -2846,11 +2943,11 @@ function bindEvents() {
   document.addEventListener('click', readBar);
 }
 
-// Saves from before a category split are moved once, in place
+// Saves from before a category was split or merged are moved once, in place
 function migrate() {
   for (const [id, r] of Object.entries(items)) {
-    if (r.category !== 'Movies & TV') continue;
-    const category = splitMoviesTv(r);
+    const category = r.category === 'Movies & TV' ? splitMoviesTv(r) : MERGED[r.category];
+    if (!category) continue;
     items[id] = { ...r, category };
     store.update(id, { category });
   }
@@ -2868,10 +2965,22 @@ function start(s, u) {
   btn.innerHTML = u.photoURL
     ? `<img src="${esc(u.photoURL)}" alt="" referrerpolicy="no-referrer" />`
     : esc((u.displayName || '?')[0].toUpperCase());
-  store.listen(data => { items = data; migrate(); loaded = true; render(); queueGeo(); syncPub(); });
+  store.listen(data => {
+    const first = !loaded;
+    items = data; migrate(); loaded = true; render(); queueGeo(); syncPub();
+    // Someone new, with nothing saved yet, gets the short tour once
+    if (first && (TOUR || (!Object.keys(data).length && pref.get('tour', '') !== '1'))) openTour();
+  });
   let claimed = false;
   store.listenPublic(v => {
     pubCfg = v || {};
+    // Shelves you made public under a merged category move to the new one
+    const old = Object.values(pubCfg.shelves || {}).filter(l => MERGED[l]);
+    if (old.length) {
+      const shelves = Object.fromEntries(Object.values(pubCfg.shelves).map(l => MERGED[l] || l).filter(l => SHELF_CATS.includes(l)).map(l => [slug(l), l]));
+      savePublic({ ...pubCfg, shelves });
+      return;
+    }
     // Everyone gets a short name once, so friends can find them; quietly, and only if the rules allow it
     if (!pubCfg.name && !claimed) {
       claimed = true;
@@ -2907,7 +3016,7 @@ bindEvents();
 if (DEMO) {
   pub = demoPub();
   stats = demoStats();
-  start(demoStore(), { displayName: 'Demo', email: 'Sample data, saved only in this browser. Sign out resets it.' });
+  start(demoStore(), { displayName: 'Demo', email: 'Sample data, saved only in this browser.' });
 } else {
   const app = initializeApp(firebaseConfig);
   const auth = getAuth(app);

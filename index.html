@@ -24,6 +24,7 @@
       <h1>Recs</h1>
       <p>Everything people tell you to try, in one place.</p>
       <button id="loginBtn" class="btn-primary">Continue with Google</button>
+      <p class="login-links"><button class="link-btn" data-tour>See how it works</button><a class="link-btn" href="?demo">Try it with sample data</a></p>
       <p id="loginTip" class="login-tip">On iPhone, open this in Safari, then tap Share and Add to Home Screen to keep it like an app.</p>
     </div>
   </div>
@@ -98,6 +99,9 @@
   <div id="sheetWrap" class="sheet-wrap">
     <div id="sheet" class="sheet" role="dialog" aria-modal="true" tabindex="-1"></div>
   </div>
+
+  <!-- The short tour: shown once to someone new, and from "See how it works" -->
+  <div id="tour" class="tour hidden" role="dialog" aria-modal="true" aria-label="How Recs works"></div>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
