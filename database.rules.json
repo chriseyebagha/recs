@@ -58,6 +58,14 @@
             ".write": "auth != null && auth.uid === $uid",
             ".validate": "newData.val() === true"
           }
+        },
+        "who": {
+          "$event": {
+            "$uid": {
+              ".write": "auth != null && auth.uid === $uid",
+              ".validate": "newData.val() === true"
+            }
+          }
         }
       }
     },

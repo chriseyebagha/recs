@@ -524,18 +524,31 @@ function firebaseStore(db, uid) {
     addIdea(v) { return set(push(ref(db, 'ideas')), v); },
     vote(id, on) { const r = ref(db, `ideas/${id}/votes/${uid}`); return on ? set(r, true) : dbRemove(r); },
     ideaStatus(id, st) { return set(ref(db, `ideas/${id}/status`), st); },
+    // True the first time an account ever opens Recs. Accounts from before this was counted already have a name, so they aren't new.
+    async joined() {
+      const [j, p] = await Promise.all([get(ref(db, `users/${uid}/recsJoined`)), get(ref(db, conf))]);
+      if (j.exists()) return false;
+      set(ref(db, `users/${uid}/recsJoined`), Date.now());
+      return !p.exists();
+    },
     isAdmin() { return get(ref(db, `admins/${uid}`)).then(snap => { adminSeen = snap.val(); return adminSeen === true; }, () => { adminSeen = 'denied'; return false; }); },
   };
 }
 
 // Usage counts: per day, how many times each thing happened, and which accounts were active.
 // Never what anyone saved: no names, notes or places. Everyone can add to the counts; only admins read them.
+// For a few things it also keeps which accounts did them that day (who/{event}/{uid}), so the page can say
+// "3 of 5 people added something". An account ID and a yes; never a name, never how many, never what.
+const WHO = ['add', 'tried', 'loved', 'share_list', 'share_page', 'send', 'send_link', 'inbox_save', 'page_save', 'friend_add'];
+
 function firebaseStats(db) {
   return {
     bump(day, keys, uid) {
       const up = {};
       for (const k of keys) up[`stats/${day}/n/${k}`] = increment(1);
       if (uid) up[`stats/${day}/u/${uid}`] = true;
+      // Written on its own: if the rules don't allow it yet, the counts above still land
+      if (uid && WHO.includes(keys[0])) dbUpdate(ref(db), { [`stats/${day}/who/${keys[0]}/${uid}`]: true }).catch(() => {});
       return dbUpdate(ref(db), up).catch(() => {});
     },
     read: from => get(dbQuery(ref(db, 'stats'), orderByKey(), startAt(from))).then(snap => snap.val() || {}),
@@ -550,6 +563,7 @@ function demoStats() {
       d[day] ??= { n: {}, u: {} };
       for (const k of keys) d[day].n[k] = (d[day].n[k] || 0) + 1;
       if (uid) d[day].u[uid] = true;
+      if (uid && WHO.includes(keys[0])) ((d[day].who ??= {})[keys[0]] ??= {})[uid] = true;
       try { localStorage.setItem('recs-demo-stats', JSON.stringify(d)); } catch {}
       return Promise.resolve();
     },
@@ -624,6 +638,7 @@ function demoStore() {
     vote(id, on) { const v = structuredClone(ideas.get()); v[id].votes ??= {}; if (on) v[id].votes.demo = true; else delete v[id].votes.demo; ideas.put(v); return Promise.resolve(); },
     ideaStatus(id, st) { const v = structuredClone(ideas.get()); v[id].status = st; ideas.put(v); return Promise.resolve(); },
     isAdmin: () => Promise.resolve(true),
+    joined: () => Promise.resolve(false),
     listen(f) { cb = f; f({ ...data }); },
     listenPublic(f) { confCb = f; f(conf); },
     savePublic(v) { conf = v; try { localStorage.setItem('recs-demo-public', JSON.stringify(v)); } catch {} confCb(conf); return Promise.resolve(); },
@@ -2463,7 +2478,18 @@ function track(e, cat) {
   stats.bump(isoDay(Date.now()), keys, store?.uid || '');
 }
 
+// The periods you can look at, and what is counted in each
+const SPANS = [[1, 'Today'], [7, '7 days'], [30, '30 days'], [90, '90 days']];
+const METRICS = [
+  ['Signed up', ['signup']], ['Added a rec', ['add']], ['Marked tried', ['tried']], ['Marked loved', ['loved']],
+  ['Shared', ['share_list', 'share_page', 'send', 'send_link']], ['Added a friend', ['friend_add']],
+  ['Saved from a friend', ['inbox_save', 'page_save']], ['Public page views', ['page_view']],
+];
+// Sign-ups, and who did each thing, were not counted before this day
+const COUNTED_SINCE = '2026-11-14';
 const SUM = (days, data, k) => days.reduce((n, d) => n + (data[d]?.n?.[k] || 0), 0);
+// How many different accounts did any of these things on these days
+const DID = (days, data, events) => new Set(days.flatMap(d => events.flatMap(e => Object.keys(data[d]?.who?.[e] || {})))).size;
 const PEOPLE = (days, data) => new Set(days.flatMap(d => Object.keys(data[d]?.u || {}))).size;
 
 async function renderUsage() {
@@ -2487,61 +2513,56 @@ async function renderUsage() {
       <button class="link-btn" data-go-home>Open my Recs</button></div>`;
     return;
   }
-  const days = Array.from({ length: 30 }, (_, i) => isoDay(Date.now() - (29 - i) * 864e5));
+  // The period you pick, against the same number of days before it
+  const span = SPANS.some(x => x[0] === Number(pref.get('usage', '7'))) ? Number(pref.get('usage', '7')) : 7;
+  const total = Math.max(span * 2, 30);
+  const days = Array.from({ length: total }, (_, i) => isoDay(Date.now() - (total - 1 - i) * 864e5));
   let data = {};
   try { data = await stats.read(days[0]); } catch { drawMissing('Usage didn\'t load', 'The database rules may need the stats part.'); return; }
   if (route().view !== 'usage') return;
-  const last = days.slice(-7), prev = days.slice(-14, -7);
-  const tile = (label, cur, before, than) => {
-    const d = cur - before;
-    return `<div class="kpi"><span class="kpi-label">${label}</span><span class="kpi-num">${cur}</span>
-      <span class="kpi-was">${d === 0 ? 'same as' : d > 0 ? `up ${d} from` : `down ${-d} from`} ${before} ${than}</span></div>`;
-  };
-  // The same six counts for any stretch of days, against the stretch before it
-  const tilesFor = (now, was, than) => {
-    const both = keys => [now, was].map(ds => keys.reduce((n, k) => n + SUM(ds, data, k), 0));
-    return [
-      ['People', PEOPLE(now, data), PEOPLE(was, data)], ['Added', ...both(['add'])], ['Tried or loved', ...both(['tried', 'loved'])],
-      ['Shared', ...both(['share_list', 'share_page', 'send'])], ['Page views', ...both(['page_view'])], ['Saved from friends', ...both(['inbox_save', 'page_save'])],
-    ].map(t => tile(...t, than)).join('');
-  };
-  const sumBoth = keys => [last, prev].map(ds => keys.reduce((n, k) => n + SUM(ds, data, k), 0));
-  const todayTiles = tilesFor(days.slice(-1), days.slice(-2, -1), 'yesterday');
-  const tiles = tilesFor(last, prev, 'the week before');
-  const daily = days.map(d => PEOPLE([d], data));
+  const now = days.slice(-span), was = days.slice(-2 * span, -span);
+  const than = span === 1 ? 'yesterday' : `in the ${span} days before`;
+  const sum = (ds, keys) => keys.reduce((n, k) => n + SUM(ds, data, k), 0);
+  // How many times it happened, how many different people did it, and the count for the period before
+  const statRow = (label, n, before, people) => `<div class="stat-row"><div class="row-body"><div class="row-name">${label}</div>
+      <div class="row-meta">${[people ? `by ${people} ${people === 1 ? 'person' : 'people'}` : '', `${before} ${than}`].filter(Boolean).join(' · ')}</div></div>
+      <span class="stat-num">${n}</span></div>`;
+  const rows = statRow('People active', PEOPLE(now, data), PEOPLE(was, data))
+    + METRICS.map(([label, keys]) => statRow(label, sum(now, keys), sum(was, keys), DID(now, data, keys))).join('');
+  const chartDays = days.slice(-30);
+  const daily = chartDays.map(d => PEOPLE([d], data));
   const top = Math.max(1, ...daily);
   const fmt = d => new Date(d + 'T12:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  const bars = days.map((d, i) => `<span class="bar" style="--h:${daily[i] / top}" data-tip="${esc(fmt(d))}: ${daily[i]} ${daily[i] === 1 ? 'person' : 'people'}" title="${esc(fmt(d))}: ${daily[i]}"></span>`).join('');
+  const bars = chartDays.map((d, i) => `<span class="bar" style="--h:${daily[i] / top}" data-tip="${esc(fmt(d))}: ${daily[i]} ${daily[i] === 1 ? 'person' : 'people'}" title="${esc(fmt(d))}: ${daily[i]}"></span>`).join('');
   // Counts kept under a category's old names are added to its new one
-  const withOld = (e, id) => [id, ...Object.keys(MERGED).filter(k => MERGED[k] === id)].reduce((n, c) => n + SUM(days, data, `${e}~${slug(c)}`), 0);
+  const withOld = (e, id) => [id, ...Object.keys(MERGED).filter(k => MERGED[k] === id)].reduce((n, c) => n + SUM(now, data, `${e}~${slug(c)}`), 0);
   const cats = CATEGORIES.map(c => [c.id, withOld('add', c.id), withOld('loved', c.id)]).filter(c => c[1] || c[2]).sort((a, b) => b[1] - a[1] || b[2] - a[2]);
   const cmax = Math.max(1, ...cats.map(c => c[1]));
-  const swipes = sumBoth(['swipe'])[0], ideasN = sumBoth(['idea'])[0];
   const anyData = days.some(d => data[d]);
   v.innerHTML = `
     <header class="shared-head">
       <p class="eyebrow">Recs${DEMO ? ' · sample, this browser only' : ''}</p>
       <h1>Usage</h1>
-      <p class="trip-sub">${PEOPLE(days, data)} ${PEOPLE(days, data) === 1 ? 'person' : 'people'} in 30 days.</p>
+      <p class="trip-sub">Counts only, never what anyone saved.</p>
     </header>
+    <div class="seg usage-seg" role="tablist" style="--i:${SPANS.findIndex(x => x[0] === span)}">
+      ${SPANS.map(([n, label]) => `<button class="${n === span ? 'on' : ''}" data-usage-span="${n}" aria-selected="${n === span}">${label}</button>`).join('')}
+    </div>
     ${anyData ? '' : '<p class="hint">No counts yet. They start as people use this version of the app.</p>'}
-    <h2 class="pub-h">Today</h2>
-    <div class="kpis">${todayTiles}</div>
-    <h2 class="pub-h">Last 7 days</h2>
-    <div class="kpis">${tiles}</div>
+    <div class="list stats">${rows}</div>
+    ${now[0] < COUNTED_SINCE ? `<p class="hint since">Sign-ups, and how many people did each thing, are counted from ${esc(fmt(COUNTED_SINCE))}.</p>` : ''}
     <h2 class="pub-h">People each day</h2>
     <div class="chart">
       <span class="chart-max">${top}</span>
       <div class="bars" role="img" aria-label="People active each day, last 30 days, most ${top}">${bars}</div>
-      <div class="chart-axis"><span>${fmt(days[0])}</span><span id="barTip" aria-live="polite">Tap a bar</span><span>Today</span></div>
+      <div class="chart-axis"><span>${fmt(chartDays[0])}</span><span id="barTip" aria-live="polite">Tap a bar</span><span>Today</span></div>
     </div>
-    ${cats.length ? `<h2 class="pub-h">What people add, 30 days</h2>
+    ${cats.length ? `<h2 class="pub-h">What people add</h2>
       <div class="list rank">${cats.map(([c, n, l]) => `<div class="rank-row">
         <span class="rank-name">${esc(c)}</span>
         <span class="rank-bar"><i style="--w:${n / cmax}"></i></span>
         <span class="rank-num">${n}${l ? ` <small>· ${l} loved</small>` : ''}</span>
       </div>`).join('')}</div>` : ''}
-    <p class="hint usage-foot">This week: ${swipes} swipes, ${ideasN} new ${ideasN === 1 ? 'idea' : 'ideas'}. Counts only, never what anyone saved.</p>
     <div class="shared-foot"><button class="btn sec wide" data-ideas>Open ideas</button>${footNote()}</div>`;
 }
 
@@ -2864,11 +2885,12 @@ function bindEvents() {
     if (swiped) { swiped = false; e.preventDefault(); return; }
     if (t.closest('a')) return;
 
-    const el = t.closest('[data-friend-add],[data-tour],[data-tour-next],[data-tour-end],[data-guide],[data-tip-x],[data-dcat],[data-copy-uid],[data-unsent],[data-unwith],[data-in-save],[data-in-drop],[data-send],[data-friends],[data-unfriend],[data-ideas],[data-vote],[data-idea-send],[data-idea-status],[data-add-friend],[data-pub-manage],[data-insert],[data-complete],[data-pub-share],[data-toggle-city],[data-share-list],[data-share-one],[data-share-go],[data-invite],[data-save],[data-save-all],[data-go-home],[data-cat],[data-open],[data-example],[data-status],[data-status-filter],[data-places],[data-place],[data-unpinned],[data-focus],[data-setcat],[data-delete],[data-close],[data-pick],[data-pickcat],[data-signout]');
+    const el = t.closest('[data-usage-span],[data-friend-add],[data-tour],[data-tour-next],[data-tour-end],[data-guide],[data-tip-x],[data-dcat],[data-copy-uid],[data-unsent],[data-unwith],[data-in-save],[data-in-drop],[data-send],[data-friends],[data-unfriend],[data-ideas],[data-vote],[data-idea-send],[data-idea-status],[data-add-friend],[data-pub-manage],[data-insert],[data-complete],[data-pub-share],[data-toggle-city],[data-share-list],[data-share-one],[data-share-go],[data-invite],[data-save],[data-save-all],[data-go-home],[data-cat],[data-open],[data-example],[data-status],[data-status-filter],[data-places],[data-place],[data-unpinned],[data-focus],[data-setcat],[data-delete],[data-close],[data-pick],[data-pickcat],[data-signout]');
     if (!el) return;
     const d = el.dataset;
 
-    if (d.friendAdd !== undefined) addByName($('friendName').value);
+    if (d.usageSpan !== undefined) { pref.set('usage', d.usageSpan); renderUsage(); }
+    else if (d.friendAdd !== undefined) addByName($('friendName').value);
     else if (d.tour !== undefined) openTour();
     else if (d.tourNext !== undefined) tourNext();
     else if (d.tourEnd !== undefined) closeTour();
@@ -2969,6 +2991,8 @@ function start(s, u) {
   if (/^#\/?Been$/.test(location.hash)) { status = 'tried'; history.replaceState(null, '', location.pathname + location.search); }
   $('login').classList.add('hidden');
   $('app').classList.remove('hidden');
+  // Asked before anything else is written, so a new account still looks new
+  store.joined().then(isNew => { if (isNew) track('signup'); }, () => {});
   const btn = $('accountBtn');
   btn.innerHTML = u.photoURL
     ? `<img src="${esc(u.photoURL)}" alt="" referrerpolicy="no-referrer" />`

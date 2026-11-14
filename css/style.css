@@ -1178,12 +1178,6 @@ main {
 .status-chip.done { background: none; color: var(--text-3); border: 1px solid var(--line); }
 
 /* ── Usage: numbers first, then one chart, then a ranked list. One color; numbers in text colors. ── */
-.kpis { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 28px; }
-@media (min-width: 560px) { .kpis { grid-template-columns: repeat(3, 1fr); } }
-.kpi { background: var(--surface); border-radius: var(--radius); padding: 12px 14px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.kpi-label { font-size: 0.8rem; font-weight: 600; color: var(--text-2); }
-.kpi-num { font-size: 1.6rem; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; line-height: 1.15; }
-.kpi-was { font-size: 0.75rem; color: var(--text-3); line-height: 1.3; }
 .chart { position: relative; background: var(--surface); border-radius: var(--radius); padding: 22px 12px 10px; margin-bottom: 28px; }
 .chart-max { position: absolute; top: 6px; left: 12px; font-size: 0.72rem; color: var(--text-3); font-variant-numeric: tabular-nums; }
 .bars { height: 120px; display: flex; align-items: flex-end; gap: 2px; border-bottom: 1px solid var(--line); }
@@ -1198,7 +1192,6 @@ main {
 .rank-bar i { display: block; height: 100%; width: max(4px, calc(var(--w) * 100%)); background: var(--accent); border-radius: 0 4px 4px 0; }
 .rank-num { font-variant-numeric: tabular-nums; font-weight: 600; text-align: right; }
 .rank-num small { color: var(--text-3); font-weight: 400; }
-.usage-foot { margin-top: 4px; }
 
 @media (prefers-reduced-motion: reduce) {
   .vote, .in-x, .add-btn { transition: none; }
@@ -1293,3 +1286,11 @@ main {
 .name-add { display: flex; gap: 8px; }
 .name-add .btn { flex: none; height: auto; min-height: 44px; padding: 0 20px; }
 .tip .link-btn { padding: 0; font-size: inherit; text-decoration: none; flex-shrink: 0; }
+
+/* Usage: pick a period, read the counts */
+.usage-seg { margin: 0 0 16px; }
+.stat-row { position: relative; display: flex; align-items: center; gap: 12px; padding: 11px 16px; }
+.stat-row + .stat-row::before { content: ''; position: absolute; top: 0; left: 16px; right: 0; height: 1px; background: var(--line); }
+.stat-num { font-size: 1.35rem; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.hint.since { margin: 10px 4px 0; }
+.stats + .pub-h, .since + .pub-h { margin-top: 24px; }
