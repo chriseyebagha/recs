@@ -703,18 +703,26 @@ let store = null;
 let user = null;
 let items = {};
 let query = '';
-let status = pref.get('status', 'all');
+// Opens on what you haven't tried yet; that's what the list is for
+let status = 'todo';
 let place = { city: '', hood: '' };
+// Kinds picked in the chips row; none picked means every kind
+const cats = new Set();
 let override = null;
 let detailId = null;
 let navigatedIn = false;
 
 const all = () => Object.entries(items).map(([id, r]) => ({ id, ...r }));
 const STATUSES = ['all', 'todo', 'tried', 'loved'];
-if (!STATUSES.includes(status)) status = 'all';
 // Loved is a kind of tried, so Tried shows both
 const statusMatch = r => status === 'all' || (status === 'tried' ? r.status !== 'todo' : r.status === status);
 const placeMatch = r => (!place.city || cityOf(r) === place.city) && (!place.hood || hoodOf(r) === place.hood);
+// A picked kind only counts where it can show: on the map, Movies narrows nothing
+const activeCats = () => { const here = new Set(scope().map(r => r.category)); return [...cats].filter(c => here.has(c)); };
+const catMatch = r => { const a = activeCats(); return !a.length || a.includes(r.category); };
+const oneCat = () => { const a = activeCats(); return a.length === 1 ? a[0] : undefined; };
+// What the list or the map shows: the page's items, narrowed by status, place and kind
+const shownRecs = () => { const a = activeCats(); return scope().filter(r => statusMatch(r) && placeMatch(r) && (!a.length || a.includes(r.category))); };
 const beenTime = r => r.beenAt || r.updatedAt;
 const sortKey = r => r.status === 'todo' ? r.createdAt : beenTime(r);
 const byRecent = (a, b) => sortKey(b) - sortKey(a);
@@ -740,14 +748,21 @@ function route() {
 function scope() {
   const r = route();
   let list = all();
-  if (r.view === 'cat') list = list.filter(x => x.category === r.cat);
   if (r.view === 'map') list = list.filter(isPlace);
   return list;
 }
 
 // ── Rendering ──
 function render() {
-  const r = route();
+  let r = route();
+  // A kind used to be its own page; an old link to one now picks that kind on the list
+  const fromLink = r.view === 'cat';
+  if (fromLink) {
+    cats.clear(); cats.add(r.cat);
+    status = 'all';
+    history.replaceState(null, '', location.pathname + location.search);
+    r = route();
+  }
   if (r.view === 'shared') { renderShared(); return; }
   if (r.view === 'pub') { renderPub(); return; }
   if (r.view === 'usage') { renderUsage(); return; }
@@ -757,8 +772,7 @@ function render() {
   $('login').classList.add('hidden');
   $('app').classList.remove('hidden');
   const onMap = r.view === 'map';
-  $('backBtn').classList.toggle('hidden', r.view !== 'cat');
-  $('title').textContent = r.view === 'cat' ? r.cat : onMap ? 'Map' : 'Recs';
+  $('title').textContent = onMap ? 'Map' : 'Recs';
   $('viewBtn').innerHTML = onMap ? ICON.list : ICON.map;
   $('viewBtn').setAttribute('aria-label', onMap ? 'Show list' : 'Show map');
   $('viewBtn').classList.toggle('hidden', !onMap && !all().some(isPlace));
@@ -772,6 +786,8 @@ function render() {
   if (onMap && $('controls').parentElement !== $('mapTop')) $('mapTop').append($('controls'));
   if (!onMap && $('controls').parentElement !== $('app')) $('app').insertBefore($('controls'), $('main'));
   renderControls();
+  // Arriving with a kind picked from an old link: bring its chip into view
+  if (fromLink) $('kinds').querySelector('.on')?.scrollIntoView({ inline: 'center', block: 'nearest' });
 
   if (onMap) renderMap();
   else $('main').innerHTML = mainHtml();
@@ -797,13 +813,13 @@ const EXAMPLE = {
 };
 
 function addHint(r) {
-  const cat = r.view === 'cat' ? r.cat : override;
+  const cat = override || oneCat();
   return cat ? EXAMPLE[cat] || 'Name, a note, from who' : 'What did someone tell you to try?';
 }
 
 // What to type, in words, for the kind you picked or the page you're on
 function formula() {
-  const cat = override || route().cat;
+  const cat = override || oneCat();
   const kw = w => `<b>${w}</b>`;
   if (!cat) return `Pick a kind, or just type and Recs works it out.<span class="pv-more">Add ${kw('from Ana')} to remember who told you.</span>`;
   if (cat === 'Apartments') return `${kw('Address')}, then what you thought of it.`;
@@ -812,7 +828,8 @@ function formula() {
 }
 
 function renderControls() {
-  if (place.city && !placeOptions().cities.some(c => c.name === place.city)) place = { city: '', hood: '' };
+  const anyKind = placeOptions(false);
+  if (place.city && !anyKind.cities.some(c => c.name === place.city)) place = { city: '', hood: '' };
   const seg = $('statusSeg');
   const i = STATUSES.indexOf(status);
   seg.style.setProperty('--i', i);
@@ -820,18 +837,29 @@ function renderControls() {
     b.classList.toggle('on', j === i);
     b.setAttribute('aria-selected', j === i);
   });
-  const shown = scope().filter(r => statusMatch(r) && placeMatch(r));
+  $('kinds').innerHTML = kindChips();
+  $('kinds').classList.toggle('hidden', !$('kinds').innerHTML);
+  const shown = shownRecs();
   $('placeLabel').textContent = place.hood || place.city || 'Everywhere';
   $('placeBtn').classList.toggle('on', !!place.city);
-  $('placeBtn').classList.toggle('hidden', !place.city && !placeOptions().cities.length);
+  $('placeBtn').classList.toggle('hidden', !place.city && !anyKind.cities.length);
   $('shareListBtn').classList.toggle('hidden', !shown.length);
   $('countLabel').textContent = shown.length ? `${shown.length} ${route().view === 'map' ? (shown.length === 1 ? 'place' : 'places') : (shown.length === 1 ? 'item' : 'items')}` : '';
   $('controls').classList.toggle('hidden', route().view === 'home' && (!!query || !all().length));
 }
 
+// Every kind there is under the status and place picked, with its count. Tap to narrow to it; tap more to add them.
+function kindChips() {
+  const base = scope().filter(r => statusMatch(r) && placeMatch(r));
+  const here = new Set(scope().map(r => r.category));
+  const on = activeCats();
+  const kinds = HOME_ORDER.filter(c => here.has(c)).map(c => [c, base.filter(r => r.category === c).length]).filter(([c, n]) => n || on.includes(c));
+  if (kinds.length < 2 && !on.length) return '';
+  return (on.length ? `<button class="chip clear" data-fcat="" aria-label="Show every kind">${ICON.x}</button>` : '')
+    + kinds.map(([c, n]) => `<button class="chip ${on.includes(c) ? 'on' : ''}" data-fcat="${esc(c)}" aria-pressed="${on.includes(c)}">${esc(c)} <b>${n}</b></button>`).join('');
+}
+
 function mainHtml() {
-  const r = route();
-  if (r.view === 'cat') return renderCategory(r.cat);
   if (query) return renderSearch();
   return renderHome();
 }
@@ -944,13 +972,15 @@ function emptyFor() {
   const where = place.hood || place.city;
   const what = { all: 'Nothing here', todo: 'Nothing to try', tried: 'Nothing tried', loved: 'Nothing loved' }[status];
   const hint = status === 'tried' || status === 'loved' ? 'Swipe a row right when you\'ve tried it, and it shows here.' : 'Type a rec below the way you\'d text it.';
-  return `<div class="none"><p>${what}${where ? ` in ${esc(where)}` : ''} yet.</p><p class="sub">${hint}</p></div>`;
+  const narrowed = status !== 'all' || place.city || activeCats().length;
+  return `<div class="none"><p>${what}${where ? ` in ${esc(where)}` : ''} yet.</p><p class="sub">${hint}</p>
+    ${narrowed && all().length ? '<button class="link-btn" data-clear>Show everything</button>' : ''}</div>`;
 }
 
 function renderHome() {
   const recs = all();
   const sample = DEMO ? `<p class="tip"><span>This is sample data, to look around.</span><a class="link-btn" href="${esc(location.pathname)}">Sign in to start yours</a></p>` : '';
-  const sent = sample + (status === 'all' && !place.city ? inboxHtml() : '');
+  const sent = sample + (status !== 'tried' && status !== 'loved' && !place.city ? inboxHtml() : '');
   if (!recs.length) {
     return `${sent}<div class="empty">
       <h2>Save anything someone tells you to try</h2>
@@ -963,38 +993,14 @@ function renderHome() {
     </div>`;
   }
 
-  const shown = recs.filter(r => statusMatch(r) && placeMatch(r));
+  const shown = shownRecs().sort(byRecent);
   if (!shown.length) return sent + emptyFor();
 
   // Until the first swipe, say that rows swipe
   const tip = pref.get('swiped', '') === '1' ? '' : `<p class="tip"><span>Swipe a row right when you've tried it. Swipe left to delete.</span><button data-tip-x aria-label="Got it">${ICON.x}</button></p>`;
 
-  // Every kind you have, with a count: says what's in here, and jumps to it
-  const kinds = HOME_ORDER.map(c => [c, shown.filter(r => r.category === c).length]).filter(x => x[1]);
-  const strip = kinds.length > 2 ? `<nav class="kinds" aria-label="Kinds">${kinds.map(([c, k]) =>
-    `<button class="chip" data-cat="${esc(c)}">${esc(c)} <b>${k}</b></button>`).join('')}</nav>` : '';
-
-  // One group per category: the three most recent, then a way into the rest
-  return sent + tip + strip + HOME_ORDER.map(id => CAT[id]).map(c => {
-    const inCat = shown.filter(r => r.category === c.id).sort(byRecent);
-    if (!inCat.length) return '';
-    return `<section class="group">
-      <button class="group-head" data-cat="${esc(c.id)}">
-        <span>${esc(c.id)}</span>
-        <span class="group-count">${inCat.length}${ICON.chevron}</span>
-      </button>
-      <div class="list">
-        ${inCat.slice(0, 3).map(r => row(r)).join('')}
-        ${inCat.length > 3 ? `<button class="more" data-cat="${esc(c.id)}">See all ${inCat.length}</button>` : ''}
-      </div>
-    </section>`;
-  }).join('');
-}
-
-function renderCategory(cat) {
-  const shown = all().filter(r => r.category === cat && statusMatch(r) && placeMatch(r)).sort(byRecent);
-  if (!shown.length) return emptyFor();
-  return `<div class="list">${shown.map(r => row(r)).join('')}</div>`;
+  // One list, newest first. Each row names its kind, unless one kind is all that's showing.
+  return `${sent}${tip}<div class="list">${shown.map(r => row(r, { showCat: !oneCat() })).join('')}</div>`;
 }
 
 function renderSearch() {
@@ -1011,8 +1017,8 @@ function renderSearch() {
 }
 
 // ── Where sheet: cities, each with its neighborhoods ──
-function placeOptions() {
-  const base = scope().filter(statusMatch);
+function placeOptions(byKind = true) {
+  const base = scope().filter(r => statusMatch(r) && (!byKind || catMatch(r)));
   const cities = {};
   for (const r of base) {
     const c = cityOf(r);
@@ -1137,7 +1143,7 @@ function pinEl(r, onTap) {
 const RANK = { todo: 0, tried: 1, loved: 2 };
 
 async function renderMap() {
-  const recs = scope().filter(r => statusMatch(r) && placeMatch(r));
+  const recs = shownRecs();
   // Loved pins drawn last so they sit on top
   const pinned = recs.filter(r => r.lat).sort((a, b) => RANK[a.status] - RANK[b.status]);
   const unpinned = recs.filter(r => !r.lat && r.geo === 'none');
@@ -1166,7 +1172,7 @@ async function renderMap() {
   });
 
   // Refit when the filters change or a new pin lands, not on every edit
-  const key = `${status}|${place.city}|${place.hood}|${pinned.length}`;
+  const key = `${status}|${place.city}|${place.hood}|${activeCats()}|${pinned.length}`;
   if (focusing) { lastFit = key; focusing = false; return; }
   if (key === lastFit) return;
   lastFit = key;
@@ -1538,10 +1544,10 @@ function oneLine(r) {
 function listTitle(recs) {
   const r = route();
   const cats = [...new Set(recs.map(x => x.category))];
-  const what = r.view === 'cat' ? r.cat : cats.length === 1 && cats[0] !== 'Other' ? cats[0] : recs.every(isPlace) ? 'Places' : 'Things';
+  const what = cats.length === 1 && cats[0] !== 'Other' ? cats[0] : recs.every(isPlace) ? 'Places' : 'Things';
   const where = place.hood || place.city;
   const t = {
-    all: r.view === 'home' ? 'My recs' : `${what} on my list`,
+    all: r.view === 'home' && !activeCats().length ? 'My recs' : `${what} on my list`,
     todo: `${what} I want to try`,
     tried: `${what} I've tried`,
     loved: `${what} I loved`,
@@ -2601,9 +2607,9 @@ const GUIDE = [
     art: () => `<div class="tour-input">Dishoom, for Daksh<span class="add-btn sending">${ICON.send}</span></div>
       <div class="tour-pills"><span class="pv-cat">Restaurants</span><span class="pv-name">Dishoom</span><span class="pv-part to"><i>for</i> Daksh</span></div>` },
   { title: 'Where things are',
-    text: 'Your list is the first screen, grouped by kind; tap a kind to see all of it. The box at the bottom adds. Places also show on the map, top right. Your photo, top right, holds friends, what you sent, and your public page.' },
+    text: 'Your list is the first screen, newest first, opening on what you want to try. The box at the bottom adds. Places also show on the map, top right. Your photo, top right, holds friends, what you sent, and your public page.' },
   { title: 'Find it again',
-    text: 'Search by name, person or city. Narrow the list to Want to try, Tried or Loved, or to one city or neighborhood.' },
+    text: 'Search by name, person or city. Narrow the list or the map to Want to try, Tried or Loved, to the kinds you tap, like Restaurants and Bars & Cafes together, or to one city or neighborhood.' },
   { title: 'Friends',
     text: 'Tap your photo, then Friends. Add someone by their @name, or invite them with your link. What a friend sends you waits at the top of your list until you save it or let it go.' },
   { title: 'Public page',
@@ -2687,7 +2693,7 @@ function updatePreview() {
     return;
   }
   if (pickerAuto) { pickerAuto = false; picker.classList.add('hidden'); picker.classList.remove('scroll'); }
-  const p = parse(text, override, route().cat);
+  const p = parse(text, override, oneCat());
   const place = CAT[p.category].action === 'map' || p.category === 'Other';
   const part = (w, v) => `<span class="pv-part"><i>${w}</i> ${esc(v)}</span>`;
   // No "+ for" while you're already typing a "for" name
@@ -2794,7 +2800,7 @@ function save() {
   const input = $('addInput');
   const text = input.value.trim();
   if (!text) { input.focus(); return; }
-  const p = parse(text, override, route().cat);
+  const p = parse(text, override, oneCat());
   if (!p.name) { toast('Add a name first'); return; }
 
   const done = () => { input.value = ''; override = null; updatePreview(); input.blur(); };
@@ -2822,7 +2828,9 @@ function save() {
   if (p.auto) rec.auto = true;
   if (p.withs.length) rec.with = withObj(p.withs);
   // A new rec is a Want to try: on Tried or Loved it would be saved out of sight
-  if (status === 'tried' || status === 'loved') { status = 'all'; pref.set('status', status); }
+  if (status === 'tried' || status === 'loved') status = 'todo';
+  // Same for a kind that isn't one of those picked
+  if (activeCats().length && !cats.has(p.category)) cats.clear();
   const id = store.add(rec);
   track('add', p.category);
   if (rec.with) tellWith({ id, ...rec }, Object.keys(rec.with));
@@ -2856,11 +2864,6 @@ function bindEvents() {
   }
 
   $('search').addEventListener('input', e => { query = e.target.value.trim(); render(); });
-
-  $('backBtn').addEventListener('click', () => {
-    if (navigatedIn) history.back();
-    else location.hash = '';
-  });
 
   $('viewBtn').addEventListener('click', () => {
     navigatedIn = true;
@@ -2932,7 +2935,7 @@ function bindEvents() {
     if (swiped) { swiped = false; e.preventDefault(); return; }
     if (t.closest('a')) return;
 
-    const el = t.closest('[data-usage-span],[data-friend-add],[data-tour],[data-tour-next],[data-tour-end],[data-guide],[data-tip-x],[data-dcat],[data-copy-uid],[data-unsent],[data-unwith],[data-in-save],[data-in-drop],[data-send],[data-friends],[data-unfriend],[data-ideas],[data-vote],[data-idea-send],[data-idea-status],[data-add-friend],[data-pub-manage],[data-insert],[data-complete],[data-pub-share],[data-toggle-city],[data-share-list],[data-share-one],[data-share-go],[data-invite],[data-save],[data-save-all],[data-go-home],[data-cat],[data-open],[data-example],[data-status],[data-status-filter],[data-places],[data-place],[data-unpinned],[data-focus],[data-setcat],[data-delete],[data-close],[data-pick],[data-pickcat],[data-signout]');
+    const el = t.closest('[data-usage-span],[data-friend-add],[data-tour],[data-tour-next],[data-tour-end],[data-guide],[data-tip-x],[data-dcat],[data-copy-uid],[data-unsent],[data-unwith],[data-in-save],[data-in-drop],[data-send],[data-friends],[data-unfriend],[data-ideas],[data-vote],[data-idea-send],[data-idea-status],[data-add-friend],[data-pub-manage],[data-insert],[data-complete],[data-pub-share],[data-toggle-city],[data-share-list],[data-share-one],[data-share-go],[data-invite],[data-save],[data-save-all],[data-go-home],[data-fcat],[data-clear],[data-open],[data-example],[data-status],[data-status-filter],[data-places],[data-place],[data-unpinned],[data-focus],[data-setcat],[data-delete],[data-close],[data-pick],[data-pickcat],[data-signout]');
     if (!el) return;
     const d = el.dataset;
 
@@ -2965,9 +2968,8 @@ function bindEvents() {
     else if (d.pubShare !== undefined) sharePub(d.pubShare);
     else if (d.toggleCity !== undefined) toggleCity(el);
     else if (d.shareList !== undefined) {
-      const recs = scope().filter(r => statusMatch(r) && placeMatch(r)).sort(byRecent);
-      const r = route();
-      const page = r.view === 'cat' && SHELF_CATS.includes(r.cat) ? { kind: 'shelf', label: r.cat }
+      const recs = shownRecs().sort(byRecent);
+      const page = SHELF_CATS.includes(oneCat()) ? { kind: 'shelf', label: oneCat() }
         : place.city ? { kind: 'trip', label: place.city } : null;
       openShare(recs, listTitle(recs), page);
     }
@@ -2978,17 +2980,24 @@ function bindEvents() {
     else if (d.save !== undefined) wantSave(Number(d.save));
     else if (d.saveAll !== undefined) wantSave(null);
     else if (d.goHome !== undefined) location.hash = '';
-    else if (d.cat !== undefined) { navigatedIn = true; location.hash = '/' + encodeURIComponent(d.cat); }
+    else if (d.fcat !== undefined) {
+      // Drop kinds picked on the other view that can't show here, so the row reads as it behaves
+      const on = new Set(activeCats());
+      cats.clear();
+      if (d.fcat) { on.has(d.fcat) ? on.delete(d.fcat) : on.add(d.fcat); on.forEach(c => cats.add(c)); }
+      render();
+      window.scrollTo(0, 0);
+    }
+    else if (d.clear !== undefined) { cats.clear(); place = { city: '', hood: '' }; status = 'all'; render(); }
     else if (d.open !== undefined) openDetail(d.open);
     else if (d.example !== undefined) { $('addInput').value = d.example; updatePreview(); $('addInput').focus(); }
     else if (d.statusFilter !== undefined) {
       status = d.statusFilter;
-      pref.set('status', status);
       render();
     }
     else if (d.places !== undefined) openPlaces();
     else if (d.place !== undefined) { place = { city: d.place, hood: d.hood }; closeSheet(); render(); }
-    else if (d.unpinned !== undefined) listSheet('Not on the map', scope().filter(r => statusMatch(r) && placeMatch(r) && !r.lat && r.geo === 'none'));
+    else if (d.unpinned !== undefined) listSheet('Not on the map', shownRecs().filter(r => !r.lat && r.geo === 'none'));
     else if (d.focus !== undefined) focusOnMap(d.focus);
     else if (d.status !== undefined) {
       const p = { status: d.status };
@@ -3002,7 +3011,7 @@ function bindEvents() {
     else if (d.pick !== undefined) {
       const picker = $('picker');
       picker.classList.toggle('hidden');
-      if (!picker.classList.contains('hidden')) renderPicker(parse($('addInput').value, override, route().cat).category);
+      if (!picker.classList.contains('hidden')) renderPicker(parse($('addInput').value, override, oneCat()).category);
     }
     else if (d.pickcat !== undefined) {
       // Tapping the chosen kind again, on an empty box, lets Recs guess again
@@ -3051,7 +3060,10 @@ function start(s, u) {
     : esc((u.displayName || '?')[0].toUpperCase());
   store.listen(data => {
     const first = !loaded;
-    items = data; migrate(); loaded = true; render(); queueGeo(); syncPub();
+    items = data; migrate(); loaded = true;
+    // Nothing left to try: open on everything rather than an empty list
+    if (first && status === 'todo' && all().length && !all().some(r => r.status === 'todo')) status = 'all';
+    render(); queueGeo(); syncPub();
     // Someone new, with nothing saved yet, gets the short tour once
     if (first && (TOUR || (!Object.keys(data).length && pref.get('tour', '') !== '1'))) openTour();
   });

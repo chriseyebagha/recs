@@ -1307,7 +1307,14 @@ main {
 .example small { display: block; font-size: 0.75rem; font-weight: 600; color: var(--accent); margin-bottom: 2px; }
 
 /* Home: every kind you have, in one row that scrolls sideways */
-.kinds { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; margin: 0 -16px 18px; padding: 0 16px; }
+/* Filters: every kind you have, in one row that scrolls sideways; tap to narrow, tap more to add */
+.kinds { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; margin: 10px -16px 0; padding: 0 16px; }
+.kinds.hidden { display: none; }
+.kinds .chip.on { color: var(--on-accent); }
+.kinds .chip.on b { color: inherit; opacity: 0.75; }
+.kinds .chip.clear { width: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; color: var(--text-2); }
+.map-top .kinds { margin: 8px -8px 0; padding: 0 8px; }
+.none .link-btn { margin-top: 10px; }
 .kinds::-webkit-scrollbar { display: none; }
 .kinds .chip { flex-shrink: 0; white-space: nowrap; color: var(--text); }
 .kinds .chip b { font-weight: 500; color: var(--text-3); margin-left: 2px; }

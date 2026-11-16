@@ -47,9 +47,6 @@
   <div id="app" class="hidden">
     <header class="top" id="top">
       <div class="top-row">
-        <button id="backBtn" class="icon-btn back hidden" aria-label="Back">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
-        </button>
         <h1 id="title">Recs</h1>
         <button id="viewBtn" class="icon-btn round" aria-label="Show map"></button>
         <button id="accountBtn" class="avatar" aria-label="Account"></button>
@@ -61,7 +58,7 @@
       <input id="search" type="search" placeholder="Search a name, a person, a city" autocomplete="off" />
     </div>
 
-    <!-- Status and place filters; moved into the map when the map is open -->
+    <!-- Status, kind and place filters; moved into the map when the map is open -->
     <div id="controls" class="controls">
       <div id="statusSeg" class="seg" role="tablist">
         <button data-status-filter="all">All</button>
@@ -69,6 +66,7 @@
         <button data-status-filter="tried">Tried</button>
         <button data-status-filter="loved">Loved</button>
       </div>
+      <nav id="kinds" class="kinds hidden" aria-label="Kinds"></nav>
       <div class="controls-row">
         <button id="placeBtn" class="place-btn" data-places>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>
