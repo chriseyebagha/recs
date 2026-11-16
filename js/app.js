@@ -42,6 +42,13 @@ const CATEGORIES = [
   { id: 'Other', action: 'search', words: [] },
 ];
 const CAT = Object.fromEntries(CATEGORIES.map(c => [c.id, c]));
+// One of each, for picking a kind as you add
+const ONE = { Restaurants: 'Restaurant', 'Bars & Cafes': 'Bar or cafe', 'Places & Travel': 'Place', Movies: 'Movie', 'TV Shows': 'Show', Books: 'Book',
+  'Articles & Videos': 'Article or video', 'Music & Podcasts': 'Music or podcast', Games: 'Game', Events: 'Event', Recipes: 'Recipe',
+  'Apps & Products': 'App or product', 'Courses & Certs': 'Course', Services: 'Service', Apartments: 'Apartment', Other: 'Something else' };
+// Home and the picker mix places with things, so the first screen shows it holds both
+const HOME_ORDER = ['Restaurants', 'Movies', 'TV Shows', 'Books', 'Bars & Cafes', 'Music & Podcasts', 'Places & Travel', 'Articles & Videos',
+  'Recipes', 'Games', 'Events', 'Apps & Products', 'Courses & Certs', 'Services', 'Apartments', 'Other'];
 const isPlace = r => CAT[r.category]?.action === 'map';
 // Movies & TV became two categories; saves from before, and old shared links, are read as one of them
 const TV_WORDS = /\b(shows?|series|seasons?|episodes?|tv|hbo|sitcom|anime|miniseries|docuseries|netflix|hulu)\b/i;
@@ -754,6 +761,7 @@ function render() {
   $('title').textContent = r.view === 'cat' ? r.cat : onMap ? 'Map' : 'Recs';
   $('viewBtn').innerHTML = onMap ? ICON.list : ICON.map;
   $('viewBtn').setAttribute('aria-label', onMap ? 'Show list' : 'Show map');
+  $('viewBtn').classList.toggle('hidden', !onMap && !all().some(isPlace));
   $('searchWrap').classList.toggle('hidden', r.view !== 'home');
   $('addBar').classList.toggle('hidden', onMap);
   $('main').classList.toggle('hidden', onMap);
@@ -789,21 +797,18 @@ const EXAMPLE = {
 };
 
 function addHint(r) {
-  if (r.view !== 'cat') return 'Lilia, in Williamsburg, from Ana';
-  return EXAMPLE[r.cat] || 'Name, a note, from who';
+  const cat = r.view === 'cat' ? r.cat : override;
+  return cat ? EXAMPLE[cat] || 'Name, a note, from who' : 'What did someone tell you to try?';
 }
 
-// The rule, in words, for the page you're on
+// What to type, in words, for the kind you picked or the page you're on
 function formula() {
-  const r = route();
+  const cat = override || route().cat;
   const kw = w => `<b>${w}</b>`;
-  if (r.cat === 'Apartments') return `${kw('Address')}, what you thought`;
-  const place = r.view !== 'cat' || CAT[r.cat].action === 'map';
-  const rule = `${kw(r.view === 'cat' && !place ? 'Title' : 'Name')}, a note, ${place ? `${kw('in')} where, ` : ''}${kw('from')} who`;
-  const more = r.view === 'cat' ? 'A link works too.' : `Say ${kw('book')}, ${kw('show')} or ${kw('bar')} to set the kind, or paste a link.`;
-  const f = friendList()[0];
-  const send = f ? `<span class="pv-more">Add ${kw('for ' + esc(f.by))} to send it to a friend instead.</span>` : '';
-  return `${rule}<span class="pv-more">${more}</span>${send}`;
+  if (!cat) return `Pick a kind, or just type and Recs works it out.<span class="pv-more">Add ${kw('from Ana')} to remember who told you.</span>`;
+  if (cat === 'Apartments') return `${kw('Address')}, then what you thought of it.`;
+  const place = CAT[cat].action === 'map';
+  return `${place ? 'Name' : 'Title or name'}${place ? `, ${kw('in')} where` : ''}, ${kw('from')} who told you.<span class="pv-more">Only the name is needed. A note or a link works too.</span>`;
 }
 
 function renderControls() {
@@ -818,6 +823,7 @@ function renderControls() {
   const shown = scope().filter(r => statusMatch(r) && placeMatch(r));
   $('placeLabel').textContent = place.hood || place.city || 'Everywhere';
   $('placeBtn').classList.toggle('on', !!place.city);
+  $('placeBtn').classList.toggle('hidden', !place.city && !placeOptions().cities.length);
   $('shareListBtn').classList.toggle('hidden', !shown.length);
   $('countLabel').textContent = shown.length ? `${shown.length} ${route().view === 'map' ? (shown.length === 1 ? 'place' : 'places') : (shown.length === 1 ? 'item' : 'items')}` : '';
   $('controls').classList.toggle('hidden', route().view === 'home' && (!!query || !all().length));
@@ -947,11 +953,12 @@ function renderHome() {
   const sent = sample + (status === 'all' && !place.city ? inboxHtml() : '');
   if (!recs.length) {
     return `${sent}<div class="empty">
-      <h2>Nothing saved yet</h2>
-      <p>When someone recommends something, type it below the way you'd text it.</p>
+      <h2>Save anything someone tells you to try</h2>
+      <p>A restaurant, a show, a book, a barber. Type it below the way you'd text it. Tap one to see how.</p>
       <div class="examples">
-        ${['Lilia, pasta in Williamsburg, from Ana', 'The Bear, TV show from Tunde', 'Piranesi, book from Kemi']
-          .map(t => `<button class="example" data-example="${esc(t)}">${esc(t)}</button>`).join('')}
+        ${[['Restaurant', 'Lilia, in Williamsburg, from Ana'], ['Show', 'The Bear, show from Tunde'], ['Book', 'Piranesi, book from Kemi'],
+          ['Movie', 'Perfect Days, movie from Sam'], ['Podcast', 'Hardcore History, podcast from Sam']]
+          .map(([k, t]) => `<button class="example" data-example="${esc(t)}"><small>${k}</small>${esc(t)}</button>`).join('')}
       </div>
     </div>`;
   }
@@ -962,8 +969,13 @@ function renderHome() {
   // Until the first swipe, say that rows swipe
   const tip = pref.get('swiped', '') === '1' ? '' : `<p class="tip"><span>Swipe a row right when you've tried it. Swipe left to delete.</span><button data-tip-x aria-label="Got it">${ICON.x}</button></p>`;
 
+  // Every kind you have, with a count: says what's in here, and jumps to it
+  const kinds = HOME_ORDER.map(c => [c, shown.filter(r => r.category === c).length]).filter(x => x[1]);
+  const strip = kinds.length > 2 ? `<nav class="kinds" aria-label="Kinds">${kinds.map(([c, k]) =>
+    `<button class="chip" data-cat="${esc(c)}">${esc(c)} <b>${k}</b></button>`).join('')}</nav>` : '';
+
   // One group per category: the three most recent, then a way into the rest
-  return sent + tip + CATEGORIES.map(c => {
+  return sent + tip + strip + HOME_ORDER.map(id => CAT[id]).map(c => {
     const inCat = shown.filter(r => r.category === c.id).sort(byRecent);
     if (!inCat.length) return '';
     return `<section class="group">
@@ -1247,6 +1259,8 @@ function renderDetail() {
     $('dActions').innerHTML = parts.actions;
     $('dWhen').textContent = parts.when;
     if (document.activeElement?.id !== 'withAdd') $('dWith').innerHTML = withRow(r);
+    $('dWith').classList.toggle('hidden', !showsWith(r));
+    $('dPlace').classList.toggle('hidden', !showsPlace(r));
     const row = $('dWhenRow');
     row.classList.toggle('hidden', r.status === 'todo');
     row.querySelector('span').textContent = isPlace(r) ? 'Went' : 'Tried';
@@ -1287,12 +1301,12 @@ function renderDetail() {
     <div class="actions" id="dActions">${parts.actions}</div>
     <div id="dWhere" data-key="${whereKey}">${parts.where}</div>
     <label class="field"><span>Note</span><textarea data-field="note" rows="2">${esc(r.note)}</textarea></label>
-    <label class="field"><span>From</span><input data-field="from" value="${esc(r.from)}" /></label>
-    <div class="field-pair">
+    <label class="field"><span>Recommended by</span><input data-field="from" value="${esc(r.from)}" placeholder="Who told you about it?" /></label>
+    <div class="field-pair ${showsPlace(r) ? '' : 'hidden'}" id="dPlace">
       <label class="field"><span>Where</span><input data-field="where" value="${esc(r.where)}" placeholder="Neighborhood or address" /></label>
       <label class="field"><span>City</span><input data-field="city" value="${esc(r.city)}" placeholder="${esc(cityFromWhere(r.where))}" /></label>
     </div>
-    <div class="field" id="dWith">${withRow(r)}</div>
+    <div class="field ${showsWith(r) ? '' : 'hidden'}" id="dWith">${withRow(r)}</div>
     <label class="field"><span>Link</span><input data-field="link" type="url" inputmode="url" value="${esc(r.link)}" /></label>
     <div class="sheet-foot">
       <button class="link-btn danger" data-delete>Delete</button>
@@ -1300,6 +1314,10 @@ function renderDetail() {
     </div>`;
   drawMini(r);
 }
+
+// Where and City are for places; a movie doesn't have them. Who you went with comes after you've been.
+const showsPlace = r => isPlace(r) || r.category === 'Other' || !!r.where || !!r.city;
+const showsWith = r => r.status !== 'todo' || !!Object.keys(r.with || {}).length;
 
 function drawMini(r) {
   if (mini) { mini.remove(); mini = null; }
@@ -1416,13 +1434,13 @@ function openAccount() {
       <p>${esc(user.email || user.phoneNumber || '')}</p>
       <p class="sub">Everything is saved to this account, so it's on any phone or computer you sign in on.</p>
     </div>
-    <div class="list opts">
-      <button class="opt" data-guide><span class="opt-name">How it works</span><span class="opt-count">${ICON.chevron}</span></button>
-      <a class="opt" href="#/sent"><span class="opt-name">Sent by me</span><span class="opt-count">${Object.keys(sent).length || ''} ${ICON.chevron}</span></a>
-      <button class="opt" data-friends><span class="opt-name">Friends</span><span class="opt-count">${friendList().length || 'Add'} ${ICON.chevron}</span></button>
-      <button class="opt" data-pub-manage><span class="opt-name">Public page</span><span class="opt-count">${pubCfg.name ? esc(listJoin(pubLabels()) || 'Nothing on it') : 'Off'} ${ICON.chevron}</span></button>
-      <button class="opt" data-ideas><span class="opt-name">Ideas</span><span class="opt-count">Suggest or vote ${ICON.chevron}</span></button>
-      ${isAdmin ? `<a class="opt" href="#/usage"><span class="opt-name">Usage</span><span class="opt-count">Only you see this ${ICON.chevron}</span></a>` : ''}
+    <div class="list opts account-opts">
+      <button class="opt" data-guide><span class="opt-name">How it works<small>What Recs does, and where things are</small></span><span class="opt-count">${ICON.chevron}</span></button>
+      <button class="opt" data-friends><span class="opt-name">Friends<small>Send recs straight to each other</small></span><span class="opt-count">${friendList().length || 'Add'} ${ICON.chevron}</span></button>
+      <a class="opt" href="#/sent"><span class="opt-name">Sent by me<small>What you've recommended to others</small></span><span class="opt-count">${Object.keys(sent).length || ''} ${ICON.chevron}</span></a>
+      <button class="opt" data-pub-manage><span class="opt-name">Public page<small>What you loved, for anyone with your link</small></span><span class="opt-count">${pubCfg.name && pubLabels().length ? 'On' : 'Off'} ${ICON.chevron}</span></button>
+      <button class="opt" data-ideas><span class="opt-name">Ideas<small>Suggest or vote on what's next</small></span><span class="opt-count">${ICON.chevron}</span></button>
+      ${isAdmin ? `<a class="opt" href="#/usage"><span class="opt-name">Usage<small>Only you see this</small></span><span class="opt-count">${ICON.chevron}</span></a>` : ''}
     </div>
     <div class="account-actions">
       <button class="btn sec wide" data-signout>${DEMO ? 'Leave the sample' : 'Sign out'}</button>
@@ -1550,14 +1568,14 @@ function drawShareSheet() {
   const one = n === 1 && s.title === s.recs[0].name;
   $('sheet').innerHTML = `${sheetHead(one ? 'Share' : s.page ? `Share ${s.page.label}` : `Share ${n}`)}
     ${n <= 20 ? friendsCard() : ''}
-    <h3 class="sheet-sub">Share a link</h3>
+    <h3 class="sheet-sub">${n <= 20 && friendList().length ? 'Or send a link to anyone' : 'Send a link to anyone'}</h3>
     ${one ? '' : `<label class="field"><span>Title</span><input id="shareTitle" value="${esc(s.title)}" /></label>
       <p class="hint">${esc(names)}</p>`}
     ${s.recs.some(r => r.note) ? `<label class="toggle"><span>Include my notes</span><input type="checkbox" id="shareNotes" ${s.notes ? 'checked' : ''} /></label>` : ''}
     <button class="btn wide" data-share-go>Share link</button>
     <p class="hint">Whoever opens it sees only ${n === 1 ? 'this' : 'these'}, and can save ${n === 1 ? 'it' : 'any of them'} to their own Recs.</p>
-    <h3 class="sheet-sub">Public page</h3>
-    ${s.page ? publicCard(s.page) : publicIntro()}`;
+    ${one ? '' : `<h3 class="sheet-sub">Public page</h3>
+    ${s.page ? publicCard(s.page) : publicIntro()}`}`;
   delete $('sheet').dataset.id;
   $('sheet').dataset.view = 'share';
 }
@@ -2310,7 +2328,7 @@ function friendsCard() {
     return `<div class="pub-card"><button class="pub-head" data-friends>
       <span><b>Send to a friend</b><small>Add friends to send recs straight into their Recs</small></span>${ICON.chevron}</button></div>`;
   }
-  return `<h3 class="sheet-sub first">Send to a friend</h3>
+  return `<h3 class="sheet-sub first">Straight into a friend's Recs</h3>
     <div class="send-chips">${fs.map(f => `<button class="chip" data-send="${esc(f.name)}">${esc(f.by)}</button>`).join('')}</div>`;
 }
 
@@ -2392,10 +2410,10 @@ function tellWith(r, keys) {
 function withRow(r) {
   const tagged = Object.entries(r.with || {});
   const more = friendList().filter(f => !r.with?.[f.name]);
-  return `<span>With</span>
+  return `<span>${isPlace(r) ? 'Went with' : 'With'}</span>
     <div class="chips with-chips">
       ${tagged.map(([k, w]) => `<button class="chip on" data-unwith="${esc(k)}" aria-label="Remove ${esc(w.by)}">${esc(w.by)} ${ICON.x}</button>`).join('')}
-      ${more.length ? `<label class="chip add-with">+ friend<select id="withAdd" aria-label="Add who you went with"><option value=""></option>${more.map(f => `<option value="${esc(f.name)}">${esc(f.by)}</option>`).join('')}</select></label>` : tagged.length ? '' : '<span class="hint inline">Type "with Monica" when you add a place.</span>'}
+      ${more.length ? `<label class="chip add-with">+ friend<select id="withAdd" aria-label="Add who you went with"><option value=""></option>${more.map(f => `<option value="${esc(f.name)}">${esc(f.by)}</option>`).join('')}</select></label>` : tagged.length ? '' : '<span class="hint inline">Add friends from your photo, top right, to tag who you went with.</span>'}
     </div>`;
 }
 
@@ -2570,27 +2588,29 @@ async function renderUsage() {
 // One set of words, shown two ways: the first three as a short tour for someone new,
 // all of them as the "How it works" sheet in Account.
 const GUIDE = [
-  { title: 'Save it in one line',
-    text: 'Type a rec the way you\'d text it: the name, in where, from who. Recs works out what kind of thing it is. A pasted link works too.',
-    art: () => `<div class="tour-input">Lilia, in Williamsburg, from Ana</div>
-      <div class="tour-pills"><span class="pv-cat">Restaurants</span><span class="pv-name">Lilia</span><span class="pv-part"><i>in</i> Williamsburg</span><span class="pv-part"><i>from</i> Ana</span></div>` },
+  { title: 'Save anything in one line',
+    text: 'A restaurant, a show, a book, a barber. Type it the way you\'d text it, and Recs works out what kind of thing it is. Add who told you, and where it is if it\'s a place.',
+    art: () => [['Movies', 'Perfect Days', 'from', 'Sam'], ['Restaurants', 'Lilia', 'in', 'Williamsburg'], ['Books', 'Piranesi', 'from', 'Kemi']]
+      .map(([c, name, w, v]) => `<div class="tour-pills"><span class="pv-cat">${c}</span><span class="pv-name">${name}</span><span class="pv-part"><i>${w}</i> ${v}</span></div>`).join('') },
   { title: 'Tick it off',
     text: 'Everything starts as Want to try. Swipe a row right when you\'ve tried it, and again if you loved it. Swipe left to delete. Both can be undone.',
-    art: () => `<div class="list">${[['todo', 'Lilia', 'Want to try'], ['tried', 'Via Carota', 'Tried'], ['loved', 'Sushi Lin', 'Loved']]
+    art: () => `<div class="list">${[['todo', 'Lilia', 'Want to try'], ['tried', 'Severance', 'Tried'], ['loved', 'Piranesi', 'Loved']]
       .map(([status, name, label]) => `<div class="row">${mark({ status })}<div class="row-body"><div class="row-name">${name}</div><div class="row-meta">${label}</div></div></div>`).join('')}</div>` },
   { title: 'Pass it on',
-    text: 'The share arrow sends one rec, or a whole list, as a link anyone can open. Once a friend is on Recs, write "for" and their name to drop it straight into their list.',
+    text: 'Share sends one rec, or a whole list, as a link anyone can open. A friend who is on Recs gets it straight into their list, to save or let go.',
     art: () => `<div class="tour-input">Dishoom, for Daksh<span class="add-btn sending">${ICON.send}</span></div>
       <div class="tour-pills"><span class="pv-cat">Restaurants</span><span class="pv-name">Dishoom</span><span class="pv-part to"><i>for</i> Daksh</span></div>` },
+  { title: 'Where things are',
+    text: 'Your list is the first screen, grouped by kind; tap a kind to see all of it. The box at the bottom adds. Places also show on the map, top right. Your photo, top right, holds friends, what you sent, and your public page.' },
   { title: 'Find it again',
-    text: 'Search by name, person or place. Narrow the list to a city or neighborhood, or open the map to see what\'s near you.' },
+    text: 'Search by name, person or city. Narrow the list to Want to try, Tried or Loved, or to one city or neighborhood.' },
   { title: 'Friends',
-    text: 'Open Friends in Account. Add someone by their @name, or invite them with your link. What a friend sends you waits at the top of your list until you save it or let it go.' },
+    text: 'Tap your photo, then Friends. Add someone by their @name, or invite them with your link. What a friend sends you waits at the top of your list until you save it or let it go.' },
   { title: 'Public page',
     text: 'A page of what you tried or loved, for the cities and categories you choose. It updates as you go. Who recommended things, and anything you only want to try, stays private.' },
 ];
 // The words the add box reads
-const WORDS = [['in Williamsburg', 'where it is'], ['from Ana', 'who told you'], ['for Daksh', 'send it to a friend'], ['with Monica', 'who you went with'],
+const WORDS = [['from Ana', 'who told you'], ['in Williamsburg', 'where it is'], ['for Daksh', 'send it to a friend instead of saving it'], ['with Monica', 'who you went with'],
   ['book, show, bar', 'the kind of thing'], ['a link', 'opens with one tap later']];
 const TOUR_STEPS = 3;
 
@@ -2644,29 +2664,41 @@ function openGuide() {
 }
 
 // ── Adding ──
+let pickerAuto = false;  // the kinds row showed itself, rather than being opened
+
 function updatePreview() {
   const input = $('addInput');
   const raw = input.value;
   const text = raw.trim();
   const box = $('preview');
+  const picker = $('picker');
   if (!text) {
-    override = null;
-    sendMode(null);
-    $('picker').classList.add('hidden');
     const show = document.activeElement === input;
+    if (!show) override = null;
+    sendMode(null);
+    // On home, an empty box shows the kinds it can hold: pick one, or just see them
+    pickerAuto = show && route().view !== 'cat';
+    picker.classList.toggle('hidden', !pickerAuto);
+    picker.classList.toggle('scroll', pickerAuto);
+    if (pickerAuto) renderPicker(override);
+    input.placeholder = addHint(route());
     box.innerHTML = show ? `<p class="pv-formula">${formula()}</p>` : '';
     box.classList.toggle('hidden', !show);
     return;
   }
+  if (pickerAuto) { pickerAuto = false; picker.classList.add('hidden'); picker.classList.remove('scroll'); }
   const p = parse(text, override, route().cat);
   const place = CAT[p.category].action === 'map' || p.category === 'Other';
   const part = (w, v) => `<span class="pv-part"><i>${w}</i> ${esc(v)}</span>`;
   // No "+ for" while you're already typing a "for" name
   const typingKw = raw.match(/(?:^|[\s,])(from|in|near|for|with)\s+[^,;.]*$/i)?.[1].toLowerCase();
-  const add = w => w === typingKw ? '' : `<button class="pv-add" data-insert="${w}">+ ${w}</button>`;
+  // The buttons say what they're for; tapping one writes the word, so the word is learned by seeing it
+  const ADD = { in: '+ where', from: '+ who told you', for: `${ICON.send} Send to a friend` };
+  const add = w => w === typingKw ? '' : `<button class="pv-add ${w === 'for' ? 'send' : ''}" data-insert="${w}">${ADD[w]}</button>`;
   const sugg = suggestions(raw);
   box.innerHTML = `
     ${sugg ? `<div class="pv-sugg">${sugg}</div>` : ''}
+    ${p.to ? `<p class="pv-send">Goes to ${esc(p.to.by)}${p.to.uid ? '\'s Recs' : ' as a link'}, not into your list.</p>` : ''}
     <div class="pv-row">
       <button class="pv-cat" data-pick>${esc(p.category)}
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>
@@ -2686,7 +2718,9 @@ function updatePreview() {
   sendMode(p.to);
   // Typing at the end: keep the newest part in view
   const row = box.querySelector('.pv-row');
-  if (input.selectionStart === raw.length) row.scrollLeft = row.scrollWidth;
+  // The buttons after it can wait off to the right; what you typed comes first
+  const last = [...row.children].filter(el => !el.classList.contains('pv-add')).pop();
+  if (input.selectionStart === raw.length && last) row.scrollLeft = Math.max(0, last.offsetLeft + last.offsetWidth - row.clientWidth + 32);
   if (!$('picker').classList.contains('hidden')) renderPicker(p.category);
 }
 
@@ -2710,6 +2744,8 @@ function suggestions(raw) {
   const seen = new Map();
   if (kw === 'for' || kw === 'with') for (const f of friendList()) { const v = reachAs(f); seen.set(v.toLowerCase(), { v, n: 1 }); }
   else for (const r of all()) {
+    // Friends can be who told you, too
+    if (kw === 'from' && !seen.size) for (const f of friendList()) seen.set(f.by.toLowerCase(), { v: f.by, n: 0 });
     for (const v of kw === 'from' ? [r.from] : [hoodOf(r), cityOf(r)]) {
       if (!v) continue;
       const k = v.toLowerCase();
@@ -2747,8 +2783,11 @@ function caretEnd(input) {
 }
 
 function renderPicker(selected) {
-  $('picker').innerHTML = CATEGORIES.map(c =>
-    `<button class="chip ${c.id === selected ? 'on' : ''}" data-pickcat="${esc(c.id)}">${esc(c.id)}</button>`).join('');
+  const el = $('picker');
+  const x = el.scrollLeft;
+  el.innerHTML = HOME_ORDER.map(id =>
+    `<button class="chip ${id === selected ? 'on' : ''}" data-pickcat="${esc(id)}">${esc(ONE[id])}</button>`).join('');
+  el.scrollLeft = x;
 }
 
 function save() {
@@ -2957,7 +2996,12 @@ function bindEvents() {
       picker.classList.toggle('hidden');
       if (!picker.classList.contains('hidden')) renderPicker(parse($('addInput').value, override, route().cat).category);
     }
-    else if (d.pickcat !== undefined) { override = d.pickcat; $('picker').classList.add('hidden'); updatePreview(); }
+    else if (d.pickcat !== undefined) {
+      // Tapping the chosen kind again, on an empty box, lets Recs guess again
+      override = override === d.pickcat && !$('addInput').value.trim() ? null : d.pickcat;
+      $('picker').classList.add('hidden');
+      updatePreview();
+    }
     else if (d.signout !== undefined) {
       if (DEMO) { localStorage.removeItem('recs-demo'); location.href = location.pathname; }
       else signOut(getAuth()).then(() => location.reload());

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Recs</title>
-  <meta name="description" content="Everything people tell you to try, in one place." />
+  <meta name="description" content="Restaurants, shows, books, anything someone tells you to try. Saved in one line." />
   <meta name="theme-color" content="#f6f5f2" media="(prefers-color-scheme: light)" />
   <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -22,7 +22,12 @@
     <div class="login-card">
       <img src="icons/icon.svg" class="login-icon" alt="" />
       <h1>Recs</h1>
-      <p>Everything people tell you to try, in one place.</p>
+      <p>Restaurants, shows, books, anything someone tells you to try. Saved in one line, there when you need it.</p>
+      <ul class="login-eg" aria-hidden="true">
+        <li><span>Movie</span>Perfect Days, from Sam</li>
+        <li><span>Restaurant</span>Lilia, in Williamsburg, from Ana</li>
+        <li><span>Book</span>Piranesi, from Kemi</li>
+      </ul>
       <button id="loginBtn" class="btn-primary">Continue with Google</button>
       <p class="login-links"><button class="link-btn" data-tour>See how it works</button><a class="link-btn" href="?demo">Try it with sample data</a></p>
       <p id="loginTip" class="login-tip">On iPhone, open this in Safari, then tap Share and Add to Home Screen to keep it like an app.</p>
@@ -43,7 +48,7 @@
 
     <div id="searchWrap" class="search">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>
-      <input id="search" type="search" placeholder="Search name, person or place" autocomplete="off" />
+      <input id="search" type="search" placeholder="Search a name, a person, a city" autocomplete="off" />
     </div>
 
     <!-- Status and place filters; moved into the map when the map is open -->
@@ -64,6 +69,7 @@
           <span id="countLabel" class="count-label"></span>
           <button id="shareListBtn" class="share-btn" data-share-list aria-label="Share these">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><polyline points="7.5 7.5 12 3 16.5 7.5"/><path d="M5 11v8a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-8"/></svg>
+            <span>Share</span>
           </button>
         </span>
       </div>
@@ -85,7 +91,7 @@
       <div id="picker" class="picker chips hidden"></div>
       <div id="preview" class="preview hidden"></div>
       <div class="add-row">
-        <input id="addInput" type="text" placeholder="Name in neighborhood, from who" autocomplete="off" autocapitalize="sentences" enterkeyhint="done" />
+        <input id="addInput" type="text" placeholder="What did someone tell you to try?" autocomplete="off" autocapitalize="sentences" enterkeyhint="done" />
         <button id="addBtn" class="add-btn" aria-label="Save">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         </button>

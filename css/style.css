@@ -1294,3 +1294,41 @@ main {
 .stat-num { font-size: 1.35rem; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
 .hint.since { margin: 10px 4px 0; }
 .stats + .pub-h, .since + .pub-h { margin-top: 24px; }
+
+/* ── Usability pass: say what it holds, and what each control does ── */
+/* Sign-in: three examples of different kinds */
+.login-card p { margin-bottom: 20px; }
+.login-eg { list-style: none; display: flex; flex-direction: column; gap: 6px; margin: 0 0 28px; padding: 0; text-align: left; }
+.login-eg li { display: flex; align-items: baseline; gap: 10px; padding: 9px 14px; border-radius: 10px; background: var(--surface); font-size: 0.9rem; }
+.login-eg span { flex-shrink: 0; width: 74px; font-size: 0.75rem; font-weight: 600; color: var(--accent); }
+.login-card .login-links, .login-card .login-tip { margin-bottom: 0; }
+
+/* Empty home: each example says its kind */
+.example small { display: block; font-size: 0.75rem; font-weight: 600; color: var(--accent); margin-bottom: 2px; }
+
+/* Home: every kind you have, in one row that scrolls sideways */
+.kinds { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; margin: 0 -16px 18px; padding: 0 16px; }
+.kinds::-webkit-scrollbar { display: none; }
+.kinds .chip { flex-shrink: 0; white-space: nowrap; color: var(--text); }
+.kinds .chip b { font-weight: 500; color: var(--text-3); margin-left: 2px; }
+
+/* The kinds row above an empty add box: one line, scrolls sideways */
+.picker.scroll { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; padding-bottom: 8px; }
+.picker.scroll::-webkit-scrollbar { display: none; }
+.picker.scroll .chip { flex-shrink: 0; white-space: nowrap; }
+
+/* Add box: send button, and the line that says it will send */
+.pv-add.send { display: inline-flex; align-items: center; gap: 4px; }
+.pv-add.send svg { width: 12px; height: 12px; }
+.pv-send { padding: 0 4px 8px; font-size: 0.82rem; font-weight: 600; color: var(--accent); }
+
+/* Share on the list has a word, not just an arrow */
+.share-btn { width: auto; padding: 0 8px; gap: 5px; border-radius: 16px; font-size: 0.85rem; font-weight: 600; }
+.controls-right { margin-left: auto; }
+
+/* Account: each line says what it is */
+.account-opts .opt-name small { display: block; margin-top: 2px; font-size: 0.82rem; font-weight: 400; color: var(--text-2); }
+.account-opts .opt-count { flex-shrink: 0; white-space: nowrap; padding-left: 12px; }
+
+/* Lines in Account that are links read like the rest */
+a.opt { color: inherit; text-decoration: none; }
