@@ -1,6 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
 import { getDatabase, ref, onValue, get, push, set, update as dbUpdate, remove as dbRemove, increment, query as dbQuery, orderByKey, startAt } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
-import { getAuth, setPersistence, indexedDBLocalPersistence, browserLocalPersistence, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+import { getAuth, setPersistence, indexedDBLocalPersistence, browserLocalPersistence, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail, updateProfile } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 
 // Same Firebase project as the shopping list; data lives under users/{uid}/recs
 const firebaseConfig = {
@@ -1616,8 +1616,8 @@ function doShare() {
 
 function invite() {
   track('invite');
-  if (pubCfg.name) shareOut('Add me on Recs', 'Add me on Recs so we can send each other recs. Open it, sign in with Google, and tap Add.', pubUrl(pubCfg.name));
-  else shareOut('Recs', 'This is what I use to keep track of things people recommend. Open it in Safari, sign in with Google, then tap Share and Add to Home Screen.', appUrl());
+  if (pubCfg.name) shareOut('Add me on Recs', 'Add me on Recs so we can send each other recs. Open it, sign in, and tap Add.', pubUrl(pubCfg.name));
+  else shareOut('Recs', 'This is what I use to keep track of things people recommend. Open it in Safari, sign in, then tap Share and Add to Home Screen.', appUrl());
 }
 
 // ── Public pages ──
@@ -1964,7 +1964,7 @@ function drawProfile(data, name, by) {
 // Bottom of a page friends open: a way home, or what Recs is
 const footNote = () => store
   ? '<button class="link-btn" data-go-home>Open my Recs</button>'
-  : '<p class="hint">Recs keeps what people tell you to try, in one place, so you can find it later. Free, with your Google account.</p>';
+  : '<p class="hint">Recs keeps what people tell you to try, in one place, so you can find it later. Free.</p>';
 
 // One map at the top of a public page; loved pins sit on top
 let pubMap = null;
@@ -2868,6 +2868,14 @@ function bindEvents() {
   });
 
   $('accountBtn').addEventListener('click', openAccount);
+  // A phone can hold the old page for a few minutes after a release; without the form, the rest still has to start
+  if ($('emailForm')) {
+    $('emailToggle').addEventListener('click', emToggle);
+    $('emMode').addEventListener('click', () => { emNew = !emNew; emDraw(); $(emNew ? 'emName' : 'emEmail').focus(); });
+    $('emReset').addEventListener('click', emReset);
+    $('emailForm').addEventListener('submit', emSubmit);
+    $('loginBack').addEventListener('click', loginBack);
+  }
   $('locateBtn').addEventListener('click', locate);
 
   window.addEventListener('hashchange', () => {
@@ -3082,7 +3090,96 @@ function paint() {
   else if (route().view === 'pub') renderPub();
   else if (route().view === 'usage' && store) renderUsage();
   else if (store) render();
-  else { $('sharedView').classList.add('hidden'); $('app').classList.add('hidden'); $('login').classList.remove('hidden'); }
+  else showLogin();
+}
+
+// The sign-in screen. From a page a friend sent, it can be backed out of.
+function showLogin() {
+  $('sharedView').classList.add('hidden');
+  $('app').classList.add('hidden');
+  $('login').classList.remove('hidden');
+  $('loginBack')?.classList.toggle('hidden', !['shared', 'pub'].includes(route().view));
+  window.scrollTo(0, 0);
+}
+
+// ── Signing in with an email and a password, for people who'd rather not use Google ──
+let emailAuth = null;  // set once Firebase is up: { enter, create, reset }
+let emNew = false;     // creating an account, rather than signing in to one
+const AUTH_MSG = {
+  'auth/invalid-email': 'That email doesn\'t look right.',
+  'auth/missing-password': 'Type your password.',
+  'auth/weak-password': 'Use at least 6 characters.',
+  'auth/email-already-in-use': 'That email already has an account. Sign in, or use Google if that\'s how you started.',
+  'auth/invalid-credential': 'Wrong email or password. If you started with Google, use that.',
+  'auth/wrong-password': 'Wrong email or password. If you started with Google, use that.',
+  'auth/user-not-found': 'Wrong email or password. If you started with Google, use that.',
+  'auth/too-many-requests': 'Too many tries. Wait a few minutes.',
+  'auth/network-request-failed': 'No connection. Try again.',
+  'auth/operation-not-allowed': 'Email sign-in isn\'t turned on yet.',
+};
+const RESET_SENT = 'If that email has an account, a reset link is on its way. Check spam too.';
+
+function emMsg(text, ok) {
+  $('emMsg').textContent = text;
+  $('emMsg').classList.toggle('ok', !!ok);
+}
+
+function emDraw() {
+  $('emName').classList.toggle('hidden', !emNew);
+  $('emGo').textContent = emNew ? 'Create account' : 'Sign in';
+  $('emMode').textContent = emNew ? 'I have an account' : 'Create an account';
+  $('emReset').classList.toggle('hidden', emNew);
+  $('emPass').autocomplete = emNew ? 'new-password' : 'current-password';
+  $('emPass').placeholder = emNew ? 'Password, 6 characters or more' : 'Password';
+  emMsg('');
+}
+
+function emToggle() {
+  const on = document.querySelector('.login-card').classList.toggle('email');
+  $('emailForm').classList.toggle('hidden', !on);
+  $('emailToggle').textContent = on ? 'Use Google instead' : 'Use email instead';
+  if (on) { emDraw(); $('emEmail').focus(); }
+}
+
+const emEmail = () => $('emEmail').value.trim();
+const EMAIL = /^\S+@\S+\.\S+$/;
+
+async function emSubmit(e) {
+  e.preventDefault();
+  const name = $('emName').value.trim().slice(0, 40), email = emEmail(), pass = $('emPass').value;
+  if (emNew && !name) { emMsg('Add your first name.'); $('emName').focus(); return; }
+  if (!EMAIL.test(email)) { emMsg(AUTH_MSG['auth/invalid-email']); $('emEmail').focus(); return; }
+  if (!pass) { emMsg(AUTH_MSG['auth/missing-password']); $('emPass').focus(); return; }
+  if (emNew && pass.length < 6) { emMsg(AUTH_MSG['auth/weak-password']); $('emPass').focus(); return; }
+  if (!emailAuth) { emMsg('Signing in is off in the sample.'); return; }
+  const btn = $('emGo');
+  btn.disabled = true;
+  btn.textContent = 'One moment';
+  emMsg('');
+  try {
+    await (emNew ? emailAuth.create(name, email, pass) : emailAuth.enter(email, pass));
+    $('emPass').value = '';
+  } catch (err) {
+    emMsg(AUTH_MSG[err?.code] || 'That didn\'t work. Try again.');
+  }
+  btn.disabled = false;
+  btn.textContent = emNew ? 'Create account' : 'Sign in';
+}
+
+async function emReset() {
+  const email = emEmail();
+  if (!EMAIL.test(email)) { emMsg('Type your email first, then tap this again.'); $('emEmail').focus(); return; }
+  if (!emailAuth) { emMsg('Signing in is off in the sample.'); return; }
+  try { await emailAuth.reset(email); emMsg(RESET_SENT, true); }
+  // Never says whether an address has an account
+  catch (err) { err?.code === 'auth/user-not-found' ? emMsg(RESET_SENT, true) : emMsg(AUTH_MSG[err?.code] || 'That didn\'t work. Try again.'); }
+}
+
+// "Not now", on the way in from a page a friend sent: back to that page, and forget what the sign-in was for
+function loginBack() {
+  try { sessionStorage.removeItem(PENDING); sessionStorage.removeItem('recs-friend'); } catch {}
+  $('login').classList.add('hidden');
+  paint();
 }
 
 if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) $('loginTip').classList.add('hidden');
@@ -3102,17 +3199,30 @@ if (DEMO) {
   stats = firebaseStats(db);
   let started = false;
 
-  signIn = () => signInWithPopup(auth, new GoogleAuthProvider()).catch(() => toast('Sign-in failed. Try again.'));
-  $('loginBtn').addEventListener('click', signIn);
+  const begin = u => { if (started) return; started = true; start(firebaseStore(db, u.uid), u); };
+  // A new email account has no name yet. The app waits for it, so nothing is shared or claimed as "Me".
+  let naming = false;
+  emailAuth = {
+    enter: (email, pass) => signInWithEmailAndPassword(auth, email, pass),
+    async create(name, email, pass) {
+      naming = true;
+      try {
+        const { user: u } = await createUserWithEmailAndPassword(auth, email, pass);
+        await updateProfile(u, { displayName: name }).catch(() => {});
+        begin(u);
+      } finally { naming = false; }
+    },
+    reset: email => sendPasswordResetEmail(auth, email),
+  };
+
+  // Asked to sign in from a page a friend sent: the sign-in screen, with both ways in
+  signIn = showLogin;
+  $('loginBtn').addEventListener('click', () => signInWithPopup(auth, new GoogleAuthProvider()).catch(() => toast('Sign-in failed. Try again.')));
   if (route().view === 'shared' || route().view === 'pub') paint();
 
   onAuthStateChanged(auth, u => {
-    if (u && !started) {
-      started = true;
-      start(firebaseStore(db, u.uid), u);
-    } else if (!u) {
-      paint();
-    }
+    if (u && !naming) begin(u);
+    else if (!u) paint();
   });
 }
 

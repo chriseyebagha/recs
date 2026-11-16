@@ -29,7 +29,17 @@
         <li><span>Book</span>Piranesi, from Kemi</li>
       </ul>
       <button id="loginBtn" class="btn-primary">Continue with Google</button>
+      <form id="emailForm" class="email-form hidden" novalidate>
+        <input id="emName" class="hidden" type="text" placeholder="First name" autocomplete="given-name" autocapitalize="words" maxlength="40" aria-label="First name" />
+        <input id="emEmail" type="email" inputmode="email" placeholder="Email" autocomplete="email" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="Email" />
+        <input id="emPass" type="password" placeholder="Password" autocomplete="current-password" aria-label="Password" />
+        <p id="emMsg" class="em-msg" role="status" aria-live="polite"></p>
+        <button id="emGo" class="btn-primary" type="submit">Sign in</button>
+        <p class="em-links"><button type="button" class="link-btn" id="emMode">Create an account</button><button type="button" class="link-btn" id="emReset">Forgot password?</button></p>
+      </form>
+      <button id="emailToggle" class="link-btn login-alt" type="button">Use email instead</button>
       <p class="login-links"><button class="link-btn" data-tour>See how it works</button><a class="link-btn" href="?demo">Try it with sample data</a></p>
+      <button id="loginBack" class="link-btn login-alt hidden" type="button">Not now</button>
       <p id="loginTip" class="login-tip">On iPhone, open this in Safari, then tap Share and Add to Home Screen to keep it like an app.</p>
     </div>
   </div>

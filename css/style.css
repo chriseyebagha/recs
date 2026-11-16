@@ -1332,3 +1332,22 @@ main {
 
 /* Lines in Account that are links read like the rest */
 a.opt { color: inherit; text-decoration: none; }
+
+/* ── Sign in with email ── */
+/* The card centers when there's room and scrolls from its top when there isn't (keyboard up) */
+.login { align-items: flex-start; overflow-y: auto; }
+.login-card { margin: auto; }
+.login-alt { display: block; margin: 8px auto 0; padding: 8px 0; }
+.email-form { display: flex; flex-direction: column; gap: 8px; text-align: left; }
+.email-form input { width: 100%; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); padding: 12px 14px; font-size: 16px; outline: none; transition: border-color 160ms ease; }
+.email-form input:focus { border-color: var(--accent); }
+.email-form input::placeholder { color: var(--text-3); }
+.email-form .btn-primary { margin-top: 4px; }
+.email-form .btn-primary:disabled { opacity: 0.6; }
+.login-card .em-msg { margin: 0 2px; font-size: 0.85rem; color: var(--danger); }
+.login-card .em-msg:empty { display: none; }
+.login-card .em-msg.ok { color: var(--text-2); }
+.login-card .em-links { display: flex; justify-content: space-between; gap: 12px; margin: 0; }
+.em-links .link-btn { padding: 8px 0; font-size: 0.88rem; }
+/* With the form open, the screen is only the form */
+.login-card.email .login-eg, .login-card.email #loginBtn, .login-card.email .login-links, .login-card.email #loginTip { display: none; }
